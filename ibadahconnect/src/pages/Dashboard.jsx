@@ -1,22 +1,38 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { FaHeart, FaRegHeart } from 'react-icons/fa';
 import API from '../api';
 
 const Dashboard = ({ openAuthModal }) => {
   const user = JSON.parse(localStorage.getItem('user'));
+  const navigate = useNavigate();
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [packages, setPackages] = useState([]);
   const [wishlist, setWishlist] = useState(JSON.parse(localStorage.getItem('wishlist')) || []);
-  const [packages, setPackages] = useState([]); // DB se aayenge
 
   const handleBookClick = () => {
     if (!user) { openAuthModal(); } else { window.location.href = '/checkout/umrah-1'; }
   };
 
-  const toggleWishlist = (id) => {
-    let updatedWishlist = wishlist.includes(id) ? wishlist.filter(item => item !== id) : [...wishlist, id];
-    setWishlist(updatedWishlist);
-    localStorage.setItem('wishlist', JSON.stringify(updatedWishlist));
+  // Wishlist se item add/remove karne ka function
+  const toggleWishlist = (item) => {
+    let currentWishlist = JSON.parse(localStorage.getItem('wishlist')) || [];
+    const exists = currentWishlist.find(w => w.id === item.id);
+    if (exists) {
+      currentWishlist = currentWishlist.filter(w => w.id !== item.id);
+    } else {
+      currentWishlist.push(item);
+    }
+    localStorage.setItem('wishlist', JSON.stringify(currentWishlist));
+    setWishlist(currentWishlist); // State update taake heart turant red ho jaye
+  };
+
+  // Cart mein item add karne ka function
+  const handleAddToCart = (item) => {
+    let cart = JSON.parse(localStorage.getItem('cart')) || [];
+    cart.push(item);
+    localStorage.setItem('cart', JSON.stringify(cart));
+    navigate('/cart'); // Cart page pe le jaye
   };
 
   const inspirations = [
@@ -41,10 +57,12 @@ const Dashboard = ({ openAuthModal }) => {
   };
 
   const otherServices = [
-    { id: "hajj-badal", name: "Hajj Badal", price: "PKR 300,000", desc: "Fulfill the ultimate pillar of Islam.", img: "/images/hajj.jpg", btn: "View Details" },
-    { id: "wheelchair", name: "Wheelchair Donation", price: "PKR 25,000", desc: "Donate a wheelchair to Masjid al-Haram.", img: "/images/wheelchair.jpg", btn: "Add to Cart" },
-    { id: "roza-kushai", name: "Roza Kushai (Iftar)", price: "PKR 5,000", desc: "Arrange Iftar for a fasting person.", img: "/images/roza.jpg", btn: "Add to Cart" },
-    { id: "orphans", name: "Iftar for Orphan Girls", price: "PKR 40,000", desc: "Sponsor Iftar dinner for orphan girls.", img: "/images/orphans.jpg", btn: "Add to Cart" }
+    { id: "hajj-badal", name: "Hajj Badal", price: 300000, desc: "Fulfill the ultimate pillar of Islam.", img: "/images/hajj.jpg", btn: "View Details" },
+    { id: "wheelchair", name: "Wheelchair Donation", price: 25000, desc: "Donate a wheelchair to Masjid al-Haram.", img: "/images/wheelchair.jpg", btn: "Add to Cart" },
+    { id: "roza-kushai", name: "Roza Kushai (Iftar)", price: 5000, desc: "Arrange Iftar for a fasting person.", img: "/images/roza.jpg", btn: "Add to Cart" },
+    { id: "tasbeeh", name: "Tasbeeh Distribution", price: 400, desc: "Distribute prayer beads in Haram.", img: "/images/tasbeeh.jpg", btn: "Add to Cart" },
+    { id: "zamzam", name: "Ab-e-Zamzam Delivery", price: 8000, desc: "Arrange pure Zamzam water.", img: "/images/zamzam.jpg", btn: "Add to Cart" },
+    { id: "iftar-makkah", name: "Iftar in Makkah", price: 40000, desc: "Sponsor Iftar dinner for fasting people in Makkah.", img: "/images/orphans.jpg", btn: "Add to Cart" }
   ];
 
   return (
@@ -85,64 +103,61 @@ const Dashboard = ({ openAuthModal }) => {
             </div>
 
             <div className="mb-6 flex justify-between items-end">
-              <h3 className="text-2xl font-extrabold text-gray-900" style={{ fontFamily: 'Amiri, serif' }}>Umrah Badal Packages</h3>
+              <h3 className="text-2xl font-extrabold text-gray-900" style={{ fontFamily: 'Amiri, serif' }}>Umrah & Hajj Badal Packages</h3>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-16">
-              {packages.map(pkg => (
-                <div key={pkg._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col">
-                  <div className="relative aspect-video overflow-hidden bg-gray-100">
-                    <img src={pkg.image} alt={pkg.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-                    <h4 className="absolute bottom-3 left-4 text-lg font-extrabold text-white leading-tight" style={{ fontFamily: 'Amiri, serif' }}>{pkg.title}</h4>
-                    <button onClick={() => toggleWishlist(pkg._id)} className="absolute top-3 right-3 w-9 h-9 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center transition-colors">
-                      {wishlist.includes(pkg._id) ? <FaHeart className="text-red-500" /> : <FaRegHeart className="text-gray-700" />}
-                    </button>
+              {packages.map(pkg => {
+                // Normalize data for wishlist/cart
+                const itemData = { id: pkg._id, name: pkg.title, price: pkg.price, img: pkg.image, desc: pkg.desc };
+                return (
+                  <div key={pkg._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col">
+                    <div className="relative aspect-video overflow-hidden bg-gray-100">
+                      <img src={pkg.image} alt={pkg.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                      <h4 className="absolute bottom-3 left-4 text-lg font-extrabold text-white leading-tight" style={{ fontFamily: 'Amiri, serif' }}>{pkg.title}</h4>
+                      <button onClick={() => toggleWishlist(itemData)} className="absolute top-3 right-3 w-9 h-9 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center transition-colors">
+                        {wishlist.find(w => w.id === itemData.id) ? <FaHeart className="text-red-500" /> : <FaRegHeart className="text-gray-700" />}
+                      </button>
+                    </div>
+                    <div className="p-5 flex flex-col flex-1">
+                      <span className="text-xl font-extrabold text-primary mb-2">PKR {pkg.price.toLocaleString()}</span>
+                      <p className="text-gray-500 text-sm mb-5 flex-1">{pkg.desc}</p>
+                      <Link to={`/service/${pkg._id}`} className="w-full bg-gray-50 text-primary font-bold py-2.5 rounded-xl hover:bg-primary hover:text-white transition-all duration-300 text-sm flex items-center justify-center gap-1">View Details <span>→</span></Link>
+                    </div>
                   </div>
-                  <div className="p-5 flex flex-col flex-1">
-                    <span className="text-xl font-extrabold text-primary mb-2">PKR {pkg.price.toLocaleString()}</span>
-                    <p className="text-gray-500 text-sm mb-5 flex-1">{pkg.desc}</p>
-                    <Link to={`/service/${pkg._id}`} className="w-full bg-gray-50 text-primary font-bold py-2.5 rounded-xl hover:bg-primary hover:text-white transition-all duration-300 text-sm flex items-center justify-center gap-1">View Details <span>→</span></Link>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="mb-6 flex justify-between items-end">
               <h3 className="text-2xl font-extrabold text-gray-900" style={{ fontFamily: 'Amiri, serif' }}>Other Services & Donations</h3>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
-              {otherServices.map(svc => (
-                <div key={svc.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col">
-                  <div className="relative aspect-video overflow-hidden bg-gray-100">
-                    <img src={svc.img} alt={svc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
-                    <h4 className="absolute bottom-3 left-4 text-lg font-extrabold text-white" style={{ fontFamily: 'Amiri, serif' }}>{svc.name}</h4>
-                  </div>
-                  <div className="p-5 flex flex-col flex-1">
-                    <span className="text-xl font-extrabold text-primary mb-2">{svc.price}</span>
-                    <p className="text-gray-500 text-sm mb-5 flex-1">{svc.desc}</p>
-                    <Link to={`/service/${svc.id}`} className="w-full bg-gray-900 text-white font-bold py-2.5 rounded-xl hover:bg-gray-800 transition-all duration-300 text-sm text-center flex items-center justify-center gap-1">{svc.btn} <span>🛒</span></Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mb-12">
-              <h3 className="text-2xl font-extrabold text-gray-900 mb-6" style={{ fontFamily: 'Amiri, serif' }}>Daily Inspiration</h3>
-              <div className="relative h-64 md:h-72 rounded-3xl overflow-hidden shadow-xl">
-                {inspirations.map((ins, idx) => (
-                  <div key={idx} className={`absolute inset-0 transition-opacity duration-1000 ${currentSlide === idx ? 'opacity-100' : 'opacity-0'}`}>
-                    <img src={ins.img} alt={ins.title} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-black/80 to-transparent flex items-center">
-                      <div className="p-8 md:p-12 max-w-lg">
-                        <span className="inline-block bg-accent text-white text-[10px] font-bold px-3 py-1 rounded-full mb-3 tracking-widest">{ins.title}</span>
-                        <p className="text-white text-sm md:text-base font-medium leading-relaxed" style={{ fontFamily: 'Amiri, serif' }}>{ins.text}</p>
-                      </div>
+              {otherServices.map(svc => {
+                const itemData = { id: svc.id, name: svc.name, price: svc.price, img: svc.img, desc: svc.desc };
+                return (
+                  <div key={svc.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col">
+                    <div className="relative aspect-video overflow-hidden bg-gray-100">
+                      <img src={svc.img} alt={svc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                      <h4 className="absolute bottom-3 left-4 text-lg font-extrabold text-white" style={{ fontFamily: 'Amiri, serif' }}>{svc.name}</h4>
+                      <button onClick={() => toggleWishlist(itemData)} className="absolute top-3 right-3 w-9 h-9 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center transition-colors">
+                        {wishlist.find(w => w.id === itemData.id) ? <FaHeart className="text-red-500" /> : <FaRegHeart className="text-gray-700" />}
+                      </button>
+                    </div>
+                    <div className="p-5 flex flex-col flex-1">
+                      <span className="text-xl font-extrabold text-primary mb-2">PKR {svc.price.toLocaleString()}</span>
+                      <p className="text-gray-500 text-sm mb-5 flex-1">{svc.desc}</p>
+                      {svc.btn === "Add to Cart" ? (
+                        <button onClick={() => handleAddToCart(itemData)} className="w-full bg-gray-900 text-white font-bold py-2.5 rounded-xl hover:bg-gray-800 transition-all duration-300 text-sm text-center flex items-center justify-center gap-1">{svc.btn} <span>🛒</span></button>
+                      ) : (
+                        <Link to={`/service/${svc.id}`} className="w-full bg-gray-900 text-white font-bold py-2.5 rounded-xl hover:bg-gray-800 transition-all duration-300 text-sm text-center flex items-center justify-center gap-1">{svc.btn} <span>🛒</span></Link>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
           </div>

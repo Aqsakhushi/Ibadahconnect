@@ -44,11 +44,11 @@ const Navbar = ({ openModal }) => {
         </h1>
       </Link>
 
-      <div className="hidden md:flex items-center gap-8 text-gray-600 font-semibold text-sm">
+            <div className="hidden md:flex items-center gap-8 text-gray-600 font-semibold text-sm">
         <Link to="/" className="hover:text-primary transition-colors">Home</Link>
         <Link to="/dashboard" className="hover:text-primary transition-colors">Services</Link>
-        <a href="#faqs" className="hover:text-primary transition-colors">FAQs</a>
-        <a href="#how-it-works" className="hover:text-primary transition-colors">How It Works</a>
+        <Link to="/how-it-works" className="hover:text-primary transition-colors">How It Works</Link>
+        <Link to="/faqs" className="hover:text-primary transition-colors">FAQs</Link>
       </div>
 
       <div className="flex items-center gap-4">

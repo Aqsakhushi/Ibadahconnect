@@ -67,8 +67,12 @@ const BookingModal = ({ isOpen, onClose, preselectedServiceId }) => {
 
       setMessage('Success! Order booked successfully.');
       setTimeout(() => {
-        onClose();
-        navigate('/dashboard');
+                onClose();
+        if (res.data.user.role === 'Admin') {
+          navigate('/admin-dashboard'); // Admin ke liye alag page
+        } else {
+          navigate('/dashboard'); // Sponsor ke liye alag page
+        }
       }, 1500);
 
     } catch (err) {
