@@ -6,11 +6,38 @@ const Order = require('../models/Order');
 router.post('/create', async (req, res) => {
     try {
         const { sponsor, serviceType, recipientName, recipientRelation, price } = req.body;
-        const newOrder = new Order({ sponsor, serviceType, recipientName, recipientRelation, price });
+
+        let defaultMilestones = [];
+        if (serviceType === 'Umrah Badal' || serviceType === 'Hajj Badal') {
+            defaultMilestones = [
+                { step: "Ehram", isCompleted: false, proofUrl: "" },
+                { step: "Tawaf", isCompleted: false, proofUrl: "" },
+                { step: "Sa'i (Safa Marwa)", isCompleted: false, proofUrl: "" },
+                { step: "Taqsir / Halq", isCompleted: false, proofUrl: "" },
+                { step: "Dua", isCompleted: false, proofUrl: "" }
+            ];
+        } else {
+            defaultMilestones = [
+                { step: "Process Started", isCompleted: false, proofUrl: "" },
+                { step: "Completed", isCompleted: false, proofUrl: "" }
+            ];
+        }
+
+        const newOrder = new Order({
+            sponsor,
+            serviceType,
+            recipientName: recipientName || "N/A",
+            recipientRelation: recipientRelation || "N/A",
+            price: price || 0,
+            milestones: defaultMilestones
+        });
+
         await newOrder.save();
-        res.status(201).json({ message: "Order booked successfully!" });
+        res.status(201).json({ message: "Order booked successfully!", order: newOrder });
+
     } catch (error) {
-        res.status(500).json({ message: "Error booking order" });
+        console.error("ORDER CREATION ERROR:", error);
+        res.status(500).json({ message: "Error booking order", error: error.message });
     }
 });
 
@@ -24,7 +51,7 @@ router.get('/my-orders/:sponsorId', async (req, res) => {
     }
 });
 
-// GET ALL ORDERS (Sirf Admin ke liye - Sponsor ki bookings dekhne ke liye)
+// GET ALL ORDERS (Admin ke liye)
 router.get('/all', async (req, res) => {
     try {
         const orders = await Order.find().populate('sponsor', 'firstName lastName email').sort({ createdAt: -1 });

@@ -33,5 +33,18 @@ router.delete('/delete/:id', async (req, res) => {
     res.status(500).json({ message: "Error deleting package" });
   }
 });
-
+// UPDATE Package (Admin ke liye)
+router.put('/update/:id', async (req, res) => {
+  try {
+    const { title, price, desc, category, image } = req.body;
+    const updatedPackage = await Package.findByIdAndUpdate(
+      req.params.id,
+      { title, price, desc, category, image },
+      { new: true }
+    );
+    res.status(200).json({ message: "Package updated successfully", package: updatedPackage });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating package" });
+  }
+});
 module.exports = router;

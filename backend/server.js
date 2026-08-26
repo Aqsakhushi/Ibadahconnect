@@ -12,6 +12,7 @@ const Package = require('./models/Package');
 const authRoute = require('./routes/auth');
 const ordersRoute = require('./routes/orders');
 const packagesRoute = require('./routes/packages');
+const paymentRoute = require('./routes/payment');
 
 dotenv.config();
 const app = express();
@@ -22,6 +23,7 @@ app.use(express.json());
 app.use('/api/auth', authRoute);
 app.use('/api/orders', ordersRoute);
 app.use('/api/packages', packagesRoute);
+app.use('/api/payment', paymentRoute);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(async () => {
@@ -32,37 +34,40 @@ mongoose.connect(process.env.MONGO_URI)
     if (!existingUser) {
       const hashedPassword = await bcrypt.hash('123456', 10);
       await User.create({ 
-        firstName: 'Aqsa', 
-        lastName: 'Khushi', 
-        country: 'Pakistan',
-        phone: '03001234567',
+        firstName: 'First Name', 
+        lastName: 'Last Name', 
+        country: 'Pakistan', 
+        phone: '03001234567', 
         email: 'aqsa@ibadah.com', 
         password: hashedPassword, 
         role: 'Sponsor' 
       });
       console.log('Default user created: aqsa@ibadah.com');
+    } else {
+      // Agar user pehle se hai lekin naam galat hai toh usko theek kar do
+      if (existingUser.firstName !== 'First Name' || existingUser.lastName !== 'Last Name') {
+        existingUser.firstName = 'First Name';
+        existingUser.lastName = 'Last Name';
+        await existingUser.save();
+        console.log('Default user updated to: First Name Last Name');
+      }
     }
 
-    // 2. Default 12 Packages Seeder (6 Umrah + 6 Hajj)
-    const count = await Package.countDocuments();
-    if (count === 0) {
-      console.log('Adding 12 default packages to database...');
-      await Package.insertMany([
-        { title: "Economy Umrah", price: 50000, desc: "Essential Umrah Badal.", category: "Umrah Badal", image: "/images/noor.jpg" },
-        { title: "Standard Umrah", price: 80000, desc: "Enhanced service.", category: "Umrah Badal", image: "/images/barakah.jpg" },
-        { title: "Premium Umrah", price: 120000, desc: "Includes Sadaqah.", category: "Umrah Badal", image: "/images/jaryah.jpg" },
-        { title: "Video Proof Umrah", price: 90000, desc: "Complete video evidence.", category: "Umrah Badal", image: "/images/barakah.jpg" },
-        { title: "Express Umrah", price: 100000, desc: "Priority booking.", category: "Umrah Badal", image: "/images/noor.jpg" },
-        { title: "VIP Umrah Badal", price: 250000, desc: "VIP performer & live stream.", category: "Umrah Badal", image: "/images/jaryah.jpg" },
-        { title: "Economy Hajj", price: 300000, desc: "Essential Hajj Badal.", category: "Hajj Badal", image: "/images/hajj.jpg" },
-        { title: "Standard Hajj", price: 500000, desc: "Enhanced Hajj service.", category: "Hajj Badal", image: "/images/hajj.jpg" },
-        { title: "Premium Hajj", price: 800000, desc: "Includes Sadaqah.", category: "Hajj Badal", image: "/images/hajj.jpg" },
-        { title: "Video Proof Hajj", price: 600000, desc: "Complete video evidence.", category: "Hajj Badal", image: "/images/hajj.jpg" },
-        { title: "Express Hajj", price: 700000, desc: "Priority booking.", category: "Hajj Badal", image: "/images/hajj.jpg" },
-        { title: "VIP Hajj Badal", price: 1000000, desc: "VIP performer & live stream.", category: "Hajj Badal", image: "/images/hajj.jpg" }
-      ]);
-      console.log('12 Default Packages added successfully!');
-    }
+    // 2. Default 9 Packages Seeder (Force Sync)
+    console.log('Syncing 9 default packages to database...');
+    await Package.deleteMany({}); 
+    await Package.insertMany([
+      { title: "Economy Umrah", price: 50000, desc: "Essential Umrah Badal with photo updates.", category: "Umrah Badal", image: "/images/umrah1.jpg" },
+      { title: "Standard Umrah", price: 80000, desc: "Enhanced service with video documentation.", category: "Umrah Badal", image: "/images/umrah2.jpg" },
+      { title: "VIP Umrah Badal", price: 150000, desc: "VIP performer & live stream.", category: "Umrah Badal", image: "/images/umrah3.jpg" },
+      { title: "Economy Hajj", price: 300000, desc: "Essential Hajj Badal with photo updates.", category: "Hajj Badal", image: "/images/hajj1.jpg" },
+      { title: "Standard Hajj", price: 500000, desc: "Enhanced Hajj service with video documentation.", category: "Hajj Badal", image: "/images/hajj2.jpg" },
+      { title: "VIP Hajj Badal", price: 700000, desc: "VIP performer & live stream.", category: "Hajj Badal", image: "/images/hajj3.jpg" },
+      { title: "Ramadan Umrah", price: 150000, desc: "Perform Umrah in the blessed month of Ramadan.", category: "Umrah Badal", image: "/images/umrah2.jpg" },
+      { title: "Video Proof Hajj", price: 600000, desc: "Complete video evidence of all Hajj rituals.", category: "Hajj Badal", image: "/images/hajj1.jpg" },
+      { title: "Express Umrah", price: 100000, desc: "Priority booking and fastest execution.", category: "Umrah Badal", image: "/images/umrah3.jpg" }
+    ]);
+    console.log('9 Default Packages synced successfully!');
   })
   .catch((err) => console.log('MongoDB Error:', err));
 
