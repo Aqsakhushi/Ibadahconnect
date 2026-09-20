@@ -52,7 +52,7 @@ const CartPage = () => {
               <p className="text-sm text-gray-500">Total Amount</p>
               <p className="text-2xl font-extrabold text-primary">PKR {totalAmount.toLocaleString()}</p>
             </div>
-            <Link to="/dashboard" className="bg-accent text-white font-bold px-8 py-3 rounded-full hover:bg-accent/90 transition-colors">
+<Link to="/checkout" className="bg-accent text-white font-bold px-8 py-3 rounded-full hover:bg-accent/90 transition-colors">
               Proceed to Checkout
             </Link>
           </div>

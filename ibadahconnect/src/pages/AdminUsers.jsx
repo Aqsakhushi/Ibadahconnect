@@ -22,7 +22,7 @@ const AdminUsers = () => {
   }, []);
 
   // Search Logic (Filter by name or email)
-  const filteredUsers = users.filter(user => 
+  const filteredUsers = users.filter(user =>
     user.firstName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.lastName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -39,9 +39,9 @@ const AdminUsers = () => {
           <p className="text-gray-500 text-sm">A list of all the users registered on the platform.</p>
         </div>
         <div className="relative w-full md:w-64">
-          <input 
-            type="text" 
-            placeholder="Search by name or email..." 
+          <input
+            type="text"
+            placeholder="Search by name or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white border border-gray-200 focus:outline-none focus:border-primary text-sm shadow-sm"
@@ -49,7 +49,7 @@ const AdminUsers = () => {
           <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         </div>
       </div>
-
+      
       {/* Premium Table Card */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -83,21 +83,21 @@ const AdminUsers = () => {
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-4 px-6 text-gray-600 hidden md:table-cell">{usr.phone || 'N/A'}</td>
                     <td className="py-4 px-6 text-gray-600 hidden lg:table-cell">{usr.country || 'N/A'}</td>
-                    
+
                     {/* Role Badge */}
                     <td className="py-4 px-6">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                        usr.role === 'Admin' ? 'bg-red-50 text-red-600 border-red-200' : 
-                        usr.role === 'Performer' ? 'bg-purple-50 text-purple-600 border-purple-200' : 
+                        usr.role === 'Admin' ? 'bg-red-50 text-red-600 border-red-200' :
+                        usr.role === 'Performer' ? 'bg-purple-50 text-purple-600 border-purple-200' :
                         'bg-blue-50 text-blue-600 border-blue-200'
                       }`}>
                         {usr.role}
                       </span>
                     </td>
-                    
+
                     {/* Status Badge with Dot */}
                     <td className="py-4 px-6">
                       <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${
