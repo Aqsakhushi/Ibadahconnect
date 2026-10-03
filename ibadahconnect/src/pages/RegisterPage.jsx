@@ -16,6 +16,59 @@ const inputCls =
 
 const labelCls = 'block text-[13px] font-semibold text-emerald-950/80 mb-1.5';
 
+/* --------------------- CNIC OCR PARSER (NADRA front) ---------------------- */
+
+/* Ye words kabhi naam nahi ho sakte — card ke headers/garbage lines filter */
+const NAME_STOP = /(pakistan|islamic|republic|identity|national|government|certificate|card|cnic|gender|country|stay|birth|date|expir|name|father|husband|mother)/i;
+
+function parseCnicText(raw) {
+  const text = String(raw || '').replace(/\r/g, '');
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+
+  /* 1) CNIC number — dashes/dots/spaces kuch bhi ho, digits se standard format */
+  let cnicNumber = '';
+  const rawCnic = text.match(/\d{5}[.\-\s]?\d{7}[.\-\s]?\d/);
+  if (rawCnic) {
+    const d = rawCnic[0].replace(/\D/g, '');
+    if (d.length === 13) cnicNumber = d.slice(0, 5) + '-' + d.slice(5, 12) + '-' + d.slice(12);
+  }
+
+  /* 2) DOB — dd.mm.yyyy (form mein DOB field nahi hai, future k liye parse) */
+  let dob = '';
+  const dm = text.match(/\b(\d{2})[.\-/](\d{2})[.\-/](\d{4})\b/);
+  if (dm) dob = dm[1] + '.' + dm[2] + '.' + dm[3];
+
+  /* 3) Name — "Name" label k baad wali value (Father/Husband Name SKIP — bada trap!) */
+  const looksName = (s) =>
+    /^[A-Za-z][A-Za-z\s'.]{3,39}$/.test(s) && !NAME_STOP.test(s);
+  let fullName = '';
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    /* Father/Husband/Mother Name wali line poori skip */
+    if (/(father|husband|mother)\s+name/.test(lower)) continue;
+    if (/\bname\b/.test(lower)) {
+      /* value same line par ho to (e.g. "Name : Aqsa Khan") */
+      const inline = lines[i].replace(/^.*?\bname\b\s*:?\s*/i, '').trim();
+      if (looksName(inline)) { fullName = inline.replace(/\s+/g, ' '); break; }
+      /* warna value agle line par hoti hai */
+      const next = lines[i + 1] || '';
+      if (looksName(next)) { fullName = next.replace(/\s+/g, ' '); break; }
+    }
+  }
+
+  /* 4) Fallback — label match na ho to ALL-CAPS naam jaisi line dhundo (NADRA names caps mein hote hain) */
+  if (!fullName) {
+    for (const line of lines) {
+      if (/^[A-Z][A-Z\s'.]{3,39}$/.test(line) && line.includes(' ') && !NAME_STOP.test(line)) {
+        fullName = line.replace(/\s+/g, ' ');
+        break;
+      }
+    }
+  }
+
+  return { cnicNumber, dob, fullName };
+}
+
 /* ------------------------------ SVG ART PARTS ----------------------------- */
 
 const EyeIcon = ({ off }) => (
@@ -40,6 +93,14 @@ const RoleIcon = ({ role }) =>
       <path d="M9 12l2 2 4-4" />
     </svg>
   );
+
+const UploadIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-9 h-9 text-[#0F766E] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <path d="M21 15l-5-5L5 21" />
+  </svg>
+);
 
 const KaabaArt = () => (
   <svg viewBox="0 0 200 200" className="w-44 h-44 mx-auto mt-10 animate-[icFloat_6s_ease-in-out_infinite] drop-shadow-2xl" fill="none">
@@ -102,6 +163,7 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [country, setCountry] = useState('Pakistan');
   const [cnic, setCnic] = useState('');
+  const [cnicScan, setCnicScan] = useState({ fileName: '', preview: '', status: 'idle' }); // idle | scanning | done | failed
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -134,6 +196,56 @@ export default function RegisterPage() {
     if (digits.length > 5) out = digits.slice(0, 5) + '-' + digits.slice(5);
     if (digits.length > 12) out = digits.slice(0, 5) + '-' + digits.slice(5, 12) + '-' + digits.slice(12);
     setCnic(out);
+  };
+
+  /* CNIC picture -> browser OCR (tesseract.js) -> auto-fill name + CNIC number */
+  const handleCnicUpload = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (cnicScan.status === 'scanning') return;
+    if (file.size > 15 * 1024 * 1024) {
+      setToast({ type: 'info', text: 'Image is too large — please upload a picture under 15MB.' });
+      return;
+    }
+
+    const preview = URL.createObjectURL(file);
+    setCnicScan({ fileName: file.name, preview, status: 'scanning' });
+
+    /* OCR run — dynamic import taake page package ke bina bhi crash na ho */
+    let text = '';
+    try {
+      const mod = await import('tesseract.js');
+      const Tesseract = mod.default || mod;
+      const { data } = await Tesseract.recognize(file, 'eng');
+      text = (data && data.text) || '';
+    } catch (err) {
+      const msg = String((err && err.message) || '');
+      setCnicScan({ fileName: file.name, preview, status: 'failed' });
+      if (/Failed to fetch dynamically imported module|Failed to resolve|Cannot find module/i.test(msg)) {
+        setToast({ type: 'info', text: 'OCR package not installed — run "npm install tesseract.js" in the frontend folder and restart the dev server.' });
+      } else {
+        setToast({ type: 'info', text: 'Could not read the CNIC picture — please type your details manually.' });
+      }
+      return;
+    }
+
+    /* Parse + autofill — sirf jo fields mile wohi bharti hain, user edit kar sakta hai */
+    const fields = parseCnicText(text);
+    let filled = 0;
+    if (fields.cnicNumber) { setCnic(fields.cnicNumber); filled++; }
+    if (fields.fullName) {
+      const parts = fields.fullName.split(/\s+/);
+      setFirstName(parts[0] || firstName);
+      setLastName(parts.slice(1).join(' ') || lastName);
+      filled++;
+    }
+
+    setCnicScan({ fileName: file.name, preview, status: filled > 0 ? 'done' : 'failed' });
+    if (filled > 0) {
+      setToast({ type: 'success', text: 'Details auto-filled from CNIC — please review and correct if needed.' });
+    } else {
+      setToast({ type: 'info', text: 'Could not read the CNIC clearly — please type your details manually.' });
+    }
   };
 
   /* password strength */
@@ -294,11 +406,11 @@ export default function RegisterPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label htmlFor="firstName" className={labelCls}>First Name</label>
-                      <input id="firstName" type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} placeholder="Aqsa" />
+                      <input id="firstName" type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} placeholder="First Name" />
                     </div>
                     <div>
                       <label htmlFor="lastName" className={labelCls}>Last Name</label>
-                      <input id="lastName" type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} placeholder="Khan" />
+                      <input id="lastName" type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} placeholder="Last Name " />
                     </div>
                   </div>
 
@@ -328,7 +440,38 @@ export default function RegisterPage() {
                   <div>
                     <label htmlFor="cnic" className={labelCls}>CNIC Number <span className="font-normal text-emerald-900/40">(Optional)</span></label>
                     <input id="cnic" type="text" inputMode="numeric" value={cnic} onChange={handleCnic} className={inputCls} placeholder="42101-1234567-1" maxLength={15} />
-                    <p className="text-xs text-emerald-900/50 mt-1.5"></p>
+                    <p className="text-xs text-emerald-900/50 mt-1.5">Optional — or upload the CNIC picture below and it fills automatically.</p>
+
+                    {/* CNIC front picture -> OCR auto-fill */}
+                    <label className="block cursor-pointer rounded-xl border-2 border-dashed border-emerald-900/20 bg-white/60 hover:border-[#0F766E]/60 transition px-4 py-4 mt-3">
+                      <input type="file" accept="image/*" className="hidden" onChange={handleCnicUpload} />
+                      {cnicScan.preview ? (
+                        <div className="flex items-center gap-3">
+                          <img src={cnicScan.preview} alt="CNIC front" className="w-16 h-12 object-cover rounded-lg border border-emerald-900/10 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            {cnicScan.status === 'scanning' ? (
+                              <p className="text-sm font-semibold text-[#0F766E] flex items-center gap-2">
+                                <span className="w-4 h-4 border-2 border-[#0F766E] border-t-transparent rounded-full animate-spin" />
+                                Reading CNIC — this can take a few seconds…
+                              </p>
+                            ) : cnicScan.status === 'done' ? (
+                              <p className="text-sm font-semibold text-emerald-700">Details auto-filled — please review them.</p>
+                            ) : (
+                              <p className="text-sm font-semibold text-amber-700">Couldn't read clearly — please type your details manually.</p>
+                            )}
+                            <p className="text-xs text-emerald-900/45 truncate mt-0.5">{cnicScan.fileName}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <UploadIcon />
+                          <div>
+                            <p className="text-sm font-bold text-emerald-950/80">Upload CNIC Picture (Front Side)</p>
+                            <p className="text-xs text-emerald-900/50 mt-0.5">JPG / PNG — clear, straight photo for best results</p>
+                          </div>
+                        </div>
+                      )}
+                    </label>
                   </div>
 
                   {/* password + confirm */}
@@ -389,7 +532,7 @@ export default function RegisterPage() {
 
       {/* toast */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[100] max-w-sm px-5 py-3.5 rounded-2xl shadow-2xl animate-[icToast_.3s_ease-out_both] text-sm font-semibold ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'}`}>
+        <div className={`fixed bottom-6 right-6 z-[100] max-w-sm px-5 py-3.5 rounded-2xl shadow-2xl animate-[icToast_.3s_ease-out_both] text-sm font-semibold ${toast.type === 'success' ? 'bg-emerald-600 text-white' : toast.type === 'info' ? 'bg-amber-500 text-white' : 'bg-red-600 text-white'}`}>
           {toast.text}
         </div>
       )}

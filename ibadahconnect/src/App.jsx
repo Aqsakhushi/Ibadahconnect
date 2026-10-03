@@ -14,7 +14,7 @@ import AuthModal from './components/AuthModal';
 import HowItWorksPage from './pages/HowItWorksPage';
 import FAQsPage from './pages/FAQsPage';
 import { Toaster } from 'react-hot-toast';
-
+import GuidePage from "./pages/GuidePage";
 import PerformerOnboarding from './pages/PerformerOnboarding';
 
 // Full-page Auth (new)
@@ -35,7 +35,6 @@ import AdminRules from './pages/AdminRules';
 
 // Public & Sponsor Pages
 import Dashboard from './pages/Dashboard';
-import ServiceDetailPage from './pages/ServiceDetailPage';
 import CheckoutPage from './pages/CheckoutPage';
 import ProfilePage from './pages/ProfilePage';
 import CartPage from './pages/CartPage';
@@ -51,6 +50,15 @@ import PerformerRulesPage from './pages/PerformerRulesPage';
 import SelfFamilyPortal from './pages/SelfFamilyPortal';
 import CnicVerifyPage from './pages/CnicVerifyPage';
 import AdminCnicPanel from './pages/AdminCnicPanel';
+import MyBookings from './pages/MyBookings';
+import Notifications from './pages/Notifications';
+import Donations from './pages/Donations';
+import Settings from './pages/Settings';
+import HelpSupport from './pages/HelpSupport';
+import ServiceDetailPage from './pages/ServiceDetailPage';
+import TrackOrderPage from './pages/TrackOrderPage';
+
+
 function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
@@ -81,13 +89,14 @@ function App() {
         <Routes>
 
           {/* =========================
-              FULL-PAGE AUTH (new)
+              FULL-PAGE AUTH
           ========================= */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-<Route path="/verify-email" element={<VerifyEmailPage />} />
-<Route path="/cnic-verify" element={<CnicVerifyPage />} />
-<Route path="/admin/cnic" element={<AdminCnicPanel />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/cnic-verify" element={<CnicVerifyPage />} />
+          <Route path="/admin/cnic" element={<AdminCnicPanel />} />
+
           {/* =========================
               ADMIN
           ========================= */}
@@ -100,30 +109,19 @@ function App() {
             <Route path="history" element={<AdminHistory />} />
             <Route path="rules" element={<AdminRules />} />
           </Route>
-
+<Route path="/guide" element={<GuidePage />} />
+<Route path="/guide/:categorySlug" element={<GuidePage />} />
+<Route path="/guide/:categorySlug/:subSlug" element={<GuidePage />} />
           {/* =========================
               PERFORMER
           ========================= */}
-          <Route
-            path="/performer-onboarding"
-            element={<PerformerOnboarding />}
-          />
-
-          <Route
-            path="/performer-dashboard"
-            element={<PerformerDashboard />}
-          />
-
-          <Route
-            path="/performer-rules"
-            element={<PerformerRulesPage />}
-          />
-
-          <Route
-            path="/self-family-portal"
-            element={<SelfFamilyPortal />}
-          />
-
+          <Route path="/performer-onboarding" element={<PerformerOnboarding />} />
+          <Route path="/performer-dashboard" element={<PerformerDashboard />} />
+          <Route path="/performer-rules" element={<PerformerRulesPage />} />
+          <Route path="/self-family-portal" element={<SelfFamilyPortal />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/help-support" element={<HelpSupport />} />
+<Route path="/live-track/:orderId" element={<TrackOrderPage />} />
           {/* =========================
               PUBLIC / SPONSOR
           ========================= */}
@@ -132,20 +130,17 @@ function App() {
             element={
               <div className="min-h-screen bg-white font-outfit flex flex-col">
 
-                <Navbar
-                  openModal={goToLogin}
-                />
-<div className="pt-16 flex-grow">
+                <Navbar openModal={goToLogin} />
+
+                <div className="pt-16 flex-grow">
                   <Routes>
 
-                    {/* HOME */}
+                    {/* HOME (original) */}
                     <Route
                       path="/"
                       element={
                         <>
-                          <HeroSection
-                            openAuthModal={goToLogin}
-                          />
+                          <HeroSection openAuthModal={goToLogin} />
                           <WhyChooseUs />
                           <ServicesSection />
                           <HowItWorks />
@@ -154,102 +149,56 @@ function App() {
                       }
                     />
 
+                    {/* HOW IT WORKS + FAQS (tumhari apni purani pages) */}
+                    <Route path="/how-it-works" element={<HowItWorksPage />} />
+                    <Route path="/faqs" element={<FAQsPage />} />
+
                     {/* SERVICE DETAILS */}
                     <Route
                       path="/service/:id"
-                      element={
-                        <ServiceDetailPage
-                          openAuthModal={goToLogin}
-                        />
-                      }
+                      element={<ServiceDetailPage openAuthModal={goToLogin} />}
                     />
                     <Route path="/checkout" element={<CheckoutPage />} />
                     <Route path="/checkout/:id" element={<CheckoutPage />} />
+
                     {/* PAYMENT RESPONSE */}
-                    <Route
-                      path="/payment-response"
-                      element={<PaymentResponse />}
-                    />
+                    <Route path="/payment-response" element={<PaymentResponse />} />
 
                     {/* DASHBOARD */}
-                    <Route
-                      path="/dashboard"
-                      element={
-                        <Dashboard
-                          openAuthModal={goToLogin}
-                        />
-                      }
-                    />
+                    <Route path="/dashboard" element={<Dashboard openAuthModal={goToLogin} />} />
 
                     {/* PROFILE */}
-                    <Route
-                      path="/profile"
-                      element={<ProfilePage />}
-                    />
+                    <Route path="/profile" element={<ProfilePage />} />
+                    <Route path="/personal-info" element={<ProfilePage />} />
 
-                    <Route
-                      path="/personal-info"
-                      element={<ProfilePage />}
-                    />
+                    <Route path="/bookings" element={<MyBookings />} />
+                    <Route path="/notifications" element={<Notifications />} />
+                    <Route path="/donations" element={<Donations />} />
 
                     {/* CART */}
-                    <Route
-                      path="/cart"
-                      element={<CartPage />}
-                    />
+                    <Route path="/cart" element={<CartPage />} />
 
                     {/* WISHLIST */}
-                    <Route
-                      path="/wishlist"
-                      element={<WishlistPage />}
-                    />
+                    <Route path="/wishlist" element={<WishlistPage />} />
 
                     {/* REMINDERS */}
-                    <Route
-                      path="/reminders"
-                      element={<RemindersPage />}
-                    />
+                    <Route path="/reminders" element={<RemindersPage />} />
 
                     {/* TRACK ORDER */}
-                    <Route
-                      path="/track"
-                      element={<TrackOrder />}
-                    />
+                    <Route path="/track" element={<TrackOrder />} />
+                    <Route path="/track/:code" element={<TrackOrder />} />
 
-                    <Route
-                      path="/track/:code"
-                      element={<TrackOrder />}
-                    />
-
-                    {/* PERFORMER PUBLIC PROFILE (Facebook style) */}
-                    <Route
-                      path="/performer/:id"
-                      element={<PerformerProfile />}
-                    />
-
-                    {/* HOW IT WORKS */}
-                    <Route
-                      path="/how-it-works"
-                      element={<HowItWorksPage />}
-                    />
-
-                    {/* FAQS */}
-                    <Route
-                      path="/faqs"
-                      element={<FAQsPage />}
-                    />
+                    {/* PERFORMER PUBLIC PROFILE */}
+                    <Route path="/performer/:id" element={<PerformerProfile />} />
 
                   </Routes>
-
                 </div>
 
                 <Footer />
 
                 <AuthModal
                   open={isAuthModalOpen}
-                  onClose={() =>
-                    setIsAuthModalOpen(false)
-                  }
+                  onClose={() => setIsAuthModalOpen(false)}
                 />
 
               </div>
@@ -262,4 +211,4 @@ function App() {
   );
 }
 
-export default App
+export default App;

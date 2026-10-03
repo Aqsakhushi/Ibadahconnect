@@ -83,6 +83,11 @@ const OrderSchema = new mongoose.Schema(
     proofOcr: { type: mongoose.Schema.Types.Mixed, default: null },
     proofSubmittedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
+
+    // ─── Auto Certificate (Feature #4) ───
+    // Order complete hote hi khud-ba-khud PDF certificate generate hota hai
+    certificateUrl: { type: String, default: '' },
+    certificateGeneratedAt: { type: Date, default: null },
   },
   // timestamps: createdAt / updatedAt khud-ba-khud (timing show karne k liye)
   { timestamps: true }

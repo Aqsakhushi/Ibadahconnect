@@ -3,25 +3,66 @@
 // Env vars: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM, BASE_URL
 // ============================================================
 const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
+
+// ---- SAFETY NET: dotenv/dotenvx fail bhi ho jaye to ye khud .env file parh lega ----
+(function loadEnvFileManually() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) {
+    console.log('', envPath);
+    return;
+  }
+  const raw = fs.readFileSync(envPath, 'utf8').replace(/^\uFEFF/, '');
+  const keys = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    let val = m[2];
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    keys.push(key);
+    if (process.env[key] === undefined || process.env[key] === '') {
+      process.env[key] = val;
+    }
+  }
+  console.log('[ENV FILE] .env ke keys mile:', keys.join(', '));
+})();
+
+const SMTP_USER_ENV = process.env.SMTP_USER || '';
+const SMTP_PASS_ENV = process.env.SMTP_PASS || '';
+
+// ---- STARTUP DIAGNOSTIC: har start par batayega kya mila kya missing ----
+console.log('---------------- [EMAIL CONFIG] ----------------');
+console.log(`SMTP_USER: ${SMTP_USER_ENV ? `SET (${SMTP_USER_ENV})` : 'MISSING - .env check karo!'}`);
+console.log(`SMTP_PASS: ${SMTP_PASS_ENV ? `SET (length ${SMTP_PASS_ENV.length})` : 'MISSING - .env check karo!'}`);
+console.log(`SMTP_HOST: ${process.env.SMTP_HOST || 'smtp.gmail.com (default)'}`);
+console.log(`SMTP_PORT: ${process.env.SMTP_PORT || '587 (default)'}`);
+console.log('------------------------------------------------');
+
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false,
+  port: SMTP_PORT,
+  secure: SMTP_PORT === 465,
+  family: 4,
   auth: {
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || ''
+    user: SMTP_USER_ENV,
+    pass: SMTP_PASS_ENV
   }
 });
 
 const sendEmail = async ({ to, subject, html }) => {
   try {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.log('[EMAIL] SMTP env vars missing - email send skipped. (.env check karo)');
+    if (!SMTP_USER_ENV || !SMTP_PASS_ENV) {
+      console.log('[EMAIL] SMTP_USER / SMTP_PASS missing - email skipped. Upar [EMAIL CONFIG] lines dekho.');
       return false;
     }
     await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `IbadahConnect <${process.env.SMTP_USER}>`,
+      from: process.env.EMAIL_FROM || `IbadahConnect <${SMTP_USER_ENV}>`,
       to,
       subject,
       html

@@ -164,8 +164,17 @@ export default function LoginPage() {
       if (remember) localStorage.setItem("ic_remember_email", email.trim());
       else localStorage.removeItem("ic_remember_email");
       toast.success("Welcome back!");
+      /* ⚡ NEW: ?next= support — checkout se aaye login ko wapas checkout pe bhejo (sirf Sponsor) */
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
       const dest =
-        shaped.role === "Admin" ? "/admin" : shaped.role === "Performer" ? "/performer-dashboard" : "/dashboard";
+        next && next.startsWith("/") && shaped.role === "Sponsor"
+          ? next
+          : shaped.role === "Admin"
+          ? "/admin"
+          : shaped.role === "Performer"
+          ? "/performer-dashboard"
+          : "/dashboard";
       setTimeout(() => {
         window.location.href = dest;
       }, 800);

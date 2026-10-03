@@ -1,290 +1,344 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import API from '../api';
-import {
-  FaCheckCircle, FaCircle, FaMosque, FaUserCircle, FaVideo, FaExternalLinkAlt,
-  FaBoxOpen, FaGift, FaHourglassHalf, FaTrophy, FaUserCheck, FaArrowLeft, FaMapMarkerAlt,
-  FaPhone, FaRegClock, FaLock, FaPlayCircle, FaRobot
-} from 'react-icons/fa';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-const TrackOrderPage = () => {
-  const { orderId } = useParams();
-  const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+const API = ((import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '')) + '/api';
 
-  useEffect(() => {
-    const fetchOrder = async () => {
-      try {
-        const res = await API.get(`/orders/detail/${orderId}`);
-        setOrder(res.data);
-      } catch (err) {
-        setError('Order nahi mila. Shayad galat link hai.');
-      } finally {
-        setLoading(false);
+const SEND_MS = 5000; // Performer: har 5 sec baad server ko location bhejo
+const POLL_MS = 5000; // Sponsor: har 5 sec baad latest location fetch karo
+
+const MAKKAH = { lat: 21.4225, lng: 39.8262 }; // Masjid al-Haram
+
+// localStorage se logged-in user (CheckoutPage wala same pattern)
+const getStoredUser = () => {
+  for (const key of ['user', 'ibadahUser', 'currentUser']) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && (parsed._id || parsed.id || parsed.email)) {
+          return parsed;
+        }
       }
-    };
-    fetchOrder();
-    // Live tracking feel: har 10 second refresh
-    const timer = setInterval(fetchOrder, 10000);
-    return () => clearInterval(timer);
-  }, [orderId]);
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
+};
 
-  const statusFlow = ['Pending', 'Assigned', 'In Progress', 'Completed'];
-  const statusStep = order ? statusFlow.indexOf(order.status) : 0;
-  const doneMilestones = order ? (order.milestones || []).filter(m => m.isCompleted).length : 0;
-  const totalMilestones = order ? (order.milestones || []).length : 0;
-  const progressPct = totalMilestones ? Math.round((doneMilestones / totalMilestones) * 100) : 0;
+const getToken = () => {
+  try {
+    return localStorage.getItem('token') || '';
+  } catch (e) {
+    return '';
+  }
+};
 
-  const StatusPill = ({ status }) => {
-    const styles = {
-      'Pending': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      'Assigned': 'bg-purple-100 text-purple-700 border-purple-200',
-      'In Progress': 'bg-blue-100 text-blue-700 border-blue-200',
-      'Completed': 'bg-green-100 text-green-700 border-green-200'
+// Do lat/lng points ke darmiyan straight-line distance (km)
+const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const T = {
+  page: { minHeight: '100vh', background: '#f2f5f3', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" },
+  card: { width: '100%', maxWidth: 760, background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 10px 30px rgba(0,0,0,0.08)' },
+  h1: { margin: 0, fontSize: 22, color: '#14532d' },
+  sub: { margin: '6px 0 16px', fontSize: 14, color: '#6b7280' },
+  chip: { display: 'inline-block', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 600, marginBottom: 14 },
+  badge: { display: 'inline-block', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 700, marginBottom: 12 },
+  badgePerf: { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' },
+  badgeSpons: { background: '#fefce8', color: '#a16207', border: '1px solid #fde68a' },
+  map: { height: 420, width: '100%', borderRadius: 12, border: '1px solid #e5e7eb' },
+  btnGreen: { display: 'inline-block', marginTop: 14, padding: '12px 18px', borderRadius: 10, border: 'none', background: '#15803d', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'none' },
+  btnRed: { display: 'inline-block', marginTop: 14, padding: '12px 18px', borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'none' },
+  ok: { fontSize: 13, color: '#15803d', marginTop: 12 },
+  err: { fontSize: 13, color: '#dc2626', marginTop: 10 },
+  muted: { fontSize: 13, color: '#6b7280', marginTop: 12 },
+  small: { fontSize: 12, color: '#6b7280', marginTop: 6 },
+  link: { color: '#15803d', fontWeight: 600, textDecoration: 'none' },
+};
+
+export default function TrackOrderPage() {
+  const { orderId } = useParams();
+  const [searchParams] = useSearchParams();
+
+  const user = getStoredUser();
+  const roleParam = (searchParams.get('role') || '').toLowerCase();
+  // ?role=performer ya ?role=sponsor se force kar sakte hain, warna user ke role se decide
+  const isPerformer = roleParam
+    ? roleParam === 'performer'
+    : !!(user && String(user.role || '').toLowerCase() === 'performer');
+
+  const [sharing, setSharing] = useState(false);
+  const [geoError, setGeoError] = useState('');
+  const [lastSentAt, setLastSentAt] = useState(null);
+  const [sendOk, setSendOk] = useState(true);
+  const [loc, setLoc] = useState(null);
+  const [fetchErr, setFetchErr] = useState('');
+
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const mapDivRef = useRef(null);
+  const watchIdRef = useRef(null);
+  const lastSentAtRef = useRef(0);
+  const didFitRef = useRef(false);
+
+  /* ---------- Leaflet map init ---------- */
+  useEffect(() => {
+    if (!mapDivRef.current || mapRef.current) return;
+    const map = L.map(mapDivRef.current).setView([MAKKAH.lat, MAKKAH.lng], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+    mapRef.current = map;
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
     };
-    return <span className={`px-4 py-1.5 rounded-full text-sm font-bold border ${styles[status]}`}>{status}</span>;
+  }, []);
+  const showPoint = (lat, lng, label) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Pulse + smooth movement styles (sirf 1 dafa inject hote hain)
+    if (!window.__ibcMapStyle) {
+      window.__ibcMapStyle = true;
+      const s = document.createElement('style');
+      s.innerHTML =
+        '@keyframes ibcPulse{0%{transform:scale(.6);opacity:.8}100%{transform:scale(1.7);opacity:0}}' +
+        '.ibc-marker{transition:transform 1.2s ease-in-out}';
+      document.head.appendChild(s);
+    }
+
+    const pos = [lat, lng];
+    if (!markerRef.current) {
+      // inDrive-style person marker: green pin + pulsing halo
+      const icon = L.divIcon({
+        className: 'ibc-marker',
+        html:
+          '<div style="position:relative;width:40px;height:40px;">' +
+            '<div style="position:absolute;inset:0;border-radius:50%;background:rgba(34,197,94,.4);animation:ibcPulse 1.6s ease-out infinite;"></div>' +
+            '<div style="position:absolute;inset:6px;border-radius:50%;background:#15803d;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;">🚶</div>' +
+          '</div>',
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
+      });
+      markerRef.current = L.marker(pos, { icon }).addTo(map);
+    } else {
+      markerRef.current.setLatLng(pos);
+    }
+    if (label) markerRef.current.bindPopup(label);
+    map.panTo(pos, { animate: true });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-500 font-semibold">Loading your order tracking...</p>
-        </div>
-      </div>
-    );
-  }
+  /* ---------- Performer: GPS watch + send ---------- */
+  const sendLocation = async (p) => {
+    try {
+      const token = getToken();
+      const res = await fetch(`${API}/orders/${orderId}/location`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          latitude: p.lat,
+          longitude: p.lng,
+          accuracy: p.accuracy,
+          userId: user ? user._id || user.id : undefined,
+        }),
+      });
+      if (res.ok) {
+        setSendOk(true);
+        setLastSentAt(new Date());
+      } else {
+        setSendOk(false);
+      }
+    } catch (e) {
+      setSendOk(false); // agli update pe dobara try hoga
+    }
+  };
 
-  if (error || !order) {
+  const startSharing = () => {
+    setGeoError('');
+    if (!navigator.geolocation) {
+      setGeoError('This browser does not support location sharing.');
+      return;
+    }
+    setSharing(true);
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const p = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        };
+        showPoint(p.lat, p.lng, 'You (Performer) — live location');
+        const now = Date.now();
+        if (now - lastSentAtRef.current >= SEND_MS) {
+          lastSentAtRef.current = now;
+          sendLocation(p);
+        }
+      },
+      (err) => {
+        setGeoError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Please allow location access in your browser settings.'
+            : 'Could not get your location. Please try again.'
+        );
+      },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 }
+    );
+  };
+
+  const stopSharing = () => {
+    if (watchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    watchIdRef.current = null;
+    setSharing(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, []);
+
+  /* ---------- Sponsor: poll latest location ---------- */
+  useEffect(() => {
+    if (isPerformer) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(`${API}/orders/${orderId}/location`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!alive) return;
+        if (res.ok && data && data.location && typeof data.location.latitude === 'number') {
+          setLoc(data.location);
+          setFetchErr('');
+        } else {
+          setFetchErr((data && data.message) || 'Location not available yet.');
+        }
+      } catch (e) {
+        if (alive) setFetchErr('Could not fetch location from server.');
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [isPerformer, orderId]);
+
+  useEffect(() => {
+    if (loc && typeof loc.latitude === 'number') {
+      showPoint(
+        loc.latitude,
+        loc.longitude,
+        `Muaddi — ${new Date(loc.updatedAt || Date.now()).toLocaleTimeString()}`
+      );
+      if (!didFitRef.current) {
+        didFitRef.current = true;
+        const map = mapRef.current;
+        if (map) map.setView([loc.latitude, loc.longitude], 15);
+      }
+    }
+  }, [loc]);
+
+  /* ---------- Login gate ---------- */
+  if (!user) {
     return (
-      <div className="max-w-3xl mx-auto p-6 md:p-12 text-center">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-12">
-          <FaLock className="text-5xl text-gray-200 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-800 mb-2">Order Not Found</h2>
-          <p className="text-gray-500 mb-6">{error}</p>
-          <Link to="/dashboard" className="bg-primary text-white font-bold px-6 py-2.5 rounded-xl hover:bg-primary/90 inline-flex items-center gap-2">
-            <FaArrowLeft /> Back to Dashboard
+      <div style={T.page}>
+        <div style={{ ...T.card, maxWidth: 420 }}>
+          <h1 style={T.h1}>Login Required</h1>
+          <p style={T.sub}>
+            Please login to view or share live tracking for this order.
+          </p>
+          <Link to={`/login?redirect=/track/${orderId}`} style={T.btnGreen}>
+            Login
           </Link>
+          <p style={T.small}>
+            <Link to="/" style={T.link}>Back to home</Link>
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-4 md:p-10">
+    <div style={T.page}>
+      <div style={T.card}>
+        <h1 style={T.h1}>Live Tracking</h1>
+        <p style={T.sub}>Follow the rites as they are performed, in real time.</p>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
         <div>
-          <Link to="/dashboard" className="text-primary text-sm font-bold hover:underline flex items-center gap-1.5 mb-2">
-            <FaArrowLeft /> Back to Dashboard
-          </Link>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900">Track Your Order</h1>
-          <p className="text-gray-400 text-xs mt-1">Order ID: {order._id}</p>
+          <span style={T.chip}>Order: {orderId}</span>{' '}
+          <span style={isPerformer ? { ...T.badge, ...T.badgePerf } : { ...T.badge, ...T.badgeSpons }}>
+            {isPerformer ? 'Performer — sharing your location' : 'Sponsor — watching performer'}
+          </span>
         </div>
-        <StatusPill status={order.status} />
-      </div>
 
-      {/* Status Stepper */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-8 mb-6">
-        <div className="flex items-center justify-between relative">
-          <div className="absolute left-5 right-5 top-5 h-1 bg-gray-100 rounded-full">
-            <div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full transition-all duration-700" style={{ width: `${(statusStep / 3) * 100}%` }}></div>
+        <div ref={mapDivRef} style={T.map} />
+
+        {isPerformer ? (
+          <div>
+            {!sharing ? (
+              <button style={T.btnGreen} onClick={startSharing}>
+                Start Sharing Live Location
+              </button>
+            ) : (
+              <button style={T.btnRed} onClick={stopSharing}>
+                Stop Sharing
+              </button>
+            )}
+            {sharing && (
+              <p style={T.ok}>
+                Live sharing is on — your location updates every {SEND_MS / 1000} seconds.
+                {lastSentAt
+                  ? sendOk
+                    ? ` Last sent at ${lastSentAt.toLocaleTimeString()}.`
+                    : ' Could not reach server — retrying…'
+                  : ''}
+              </p>
+            )}
+            {geoError && <p style={T.err}>{geoError}</p>}
           </div>
-          {statusFlow.map((s, idx) => (
-            <div key={s} className="relative z-10 flex flex-col items-center text-center" style={{ width: '25%' }}>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 shadow-sm ${
-                idx < statusStep ? 'bg-green-500 border-green-100 text-white' :
-                idx === statusStep ? 'bg-primary border-green-100 text-white animate-pulse' :
-                'bg-gray-200 border-gray-50 text-gray-400'
-              }`}>
-                {idx < statusStep ? <FaCheckCircle /> : idx === statusStep ? <FaHourglassHalf className="text-sm" /> : <FaCircle className="text-[8px]" />}
-              </div>
-              <span className={`mt-2 text-[10px] md:text-xs font-bold ${idx <= statusStep ? 'text-gray-800' : 'text-gray-400'}`}>{s}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* LEFT: Milestone Timeline (2/3 width) */}
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* Progress Summary */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="font-bold text-gray-800 flex items-center gap-2"><FaMosque className="text-primary" /> Ibadah Progress</h2>
-              <span className="text-sm font-extrabold text-primary">{doneMilestones} / {totalMilestones} Steps</span>
-            </div>
-            <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden mb-1">
-              <div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full transition-all duration-700" style={{ width: `${progressPct}%` }}></div>
-            </div>
-            <p className="text-xs text-gray-400">{progressPct}% complete — har step ka video proof neeche attach hai.</p>
-
-            {/* Milestone Timeline */}
-            <div className="mt-6 space-y-0">
-              {(order.milestones || []).map((m, idx) => {
-                const isLast = idx === (order.milestones || []).length - 1;
-                return (
-                  <div key={idx} className="flex gap-4">
-                    {/* Timeline line + dot */}
-                    <div className="flex flex-col items-center">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${
-                        m.isCompleted ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400 border border-gray-200'
-                      }`}>
-                        {m.isCompleted ? <FaCheckCircle /> : idx + 1}
-                      </div>
-                      {!isLast && <div className={`w-0.5 flex-1 min-h-[40px] ${m.isCompleted ? 'bg-green-300' : 'bg-gray-200'}`}></div>}
-                    </div>
-                    {/* Content */}
-                    <div className={`pb-6 flex-1 ${isLast ? 'pb-0' : ''}`}>
-                      <p className={`font-bold ${m.isCompleted ? 'text-green-700' : 'text-gray-400'}`}>{m.step}</p>
-                      {m.isCompleted ? (
-                        m.proofUrl ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <a href={m.proofUrl} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-xl text-xs font-bold transition-colors">
-                              <FaPlayCircle /> Watch Proof Video <FaExternalLinkAlt className="text-[9px]" />
-                            </a>
-                            {m.proofLocation && (
-                              <a href={`https://www.google.com/maps?q=${m.proofLocation.lat},${m.proofLocation.lng}`} target="_blank" rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-2 rounded-xl text-xs font-bold transition-colors">
-                                <FaMapMarkerAlt /> Location Verified <FaExternalLinkAlt className="text-[9px]" />
-                              </a>
-                            )}
-                                                        {m.proofOcr?.suggestion === 'verified' && (
-                              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 px-3 py-2 rounded-xl text-xs font-bold">
-                                <FaRobot /> AI Verified (OCR Score {m.proofOcr.score})
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="mt-2 inline-block text-xs text-green-600 bg-green-50 px-3 py-1 rounded-lg">Completed (proof jald upload hoga)</span>
-                        )
-                      ) : (
-                        <span className="mt-2 inline-block text-xs text-gray-400 bg-gray-50 px-3 py-1 rounded-lg">
-                          {order.status === 'Pending' ? 'Performer assign hone ke baad shuru hoga' : 'Performer complete hone par yahan video aayega'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Completed Celebration */}
-            {order.status === 'Completed' && (
-              <div className="mt-4 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-xl p-4 flex items-center gap-3 text-white">
-                <FaTrophy className="text-3xl" />
-                <div>
-                  <p className="font-extrabold">Ibadah Mukammal! 🎉</p>
-                  <p className="text-xs opacity-90">Aap ki beh nami ke liye saare milestones perform ho chuke hain. JazakAllah Khair!</p>
-                </div>
-              </div>
+        ) : (
+          <div>
+            {loc ? (
+              <>
+                <p style={T.ok}>
+                  Last location: {new Date(loc.updatedAt || Date.now()).toLocaleTimeString()} —
+                  refreshes every {POLL_MS / 1000} seconds.
+                </p>
+                <p style={T.small}>
+                  Distance from Masjid al-Haram (Makkah): ~
+                  {haversineKm(loc.latitude, loc.longitude, MAKKAH.lat, MAKKAH.lng).toFixed(1)} km
+                </p>
+              </>
+            ) : (
+              <p style={T.muted}>{fetchErr || 'Waiting for performer location…'}</p>
             )}
           </div>
-
-          {/* Order Details */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2 mb-4"><FaBoxOpen className="text-primary" /> Order Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Package</p>
-                <p className="font-bold text-gray-800">{order.packageTitle || order.serviceType}</p>
-                <p className="text-xs text-gray-400">{order.serviceType}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Beneficiary (Marhoom/Marhooma)</p>
-                <p className="font-bold text-gray-800">{order.recipientName}</p>
-                <p className="text-xs text-gray-400">{order.recipientRelation || 'N/A'}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Payment</p>
-                <p className="font-bold text-gray-800">PKR {(order.price || 0).toLocaleString()}</p>
-                {order.hadiyah > 0 && <p className="text-xs text-green-600">includes Hadiyah PKR {order.hadiyah.toLocaleString()}</p>}
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1"><FaRegClock className="inline mr-1" />Booked On</p>
-                <p className="font-bold text-gray-800">{new Date(order.createdAt).toLocaleDateString()}</p>
-                <p className="text-xs text-gray-400">{new Date(order.createdAt).toLocaleTimeString()}</p>
-              </div>
-            </div>
-            {order.notes && (
-              <div className="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Your Special Dua / Notes</p>
-                <p className="text-sm text-gray-700 italic">"{order.notes}"</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT: Performer Card (1/3 width) */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="h-20 bg-gradient-to-r from-[#1B5E20] to-[#0a3a20]"></div>
-            <div className="px-5 pb-5 -mt-10">
-              {order.performer ? (
-                <>
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-green-800 border-4 border-white flex items-center justify-center text-white text-2xl font-extrabold shadow-md">
-                    {order.performer.firstName ? order.performer.firstName[0].toUpperCase() : 'P'}
-                  </div>
-                  <h3 className="font-extrabold text-gray-900 mt-3 text-lg">{order.performer.firstName} {order.performer.lastName}</h3>
-                  <p className="text-xs text-green-600 font-bold flex items-center gap-1 mt-1">
-                    <FaUserCheck /> Verified Performer
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">{order.performer.email}</p>
-                  <div className="mt-4 bg-green-50 border border-green-100 rounded-xl p-3">
-                    <p className="text-[10px] font-bold text-green-600 uppercase tracking-wider mb-1">Currently</p>
-                    <p className="text-sm font-bold text-gray-800">
-                      {order.status === 'Assigned' && 'Task assigned — jald start karein ge'}
-                      {order.status === 'In Progress' && `Ibadah jaari hai (${doneMilestones}/${totalMilestones} steps done)`}
-                      {order.status === 'Completed' && 'Ibadah mukammal kar chuke hain'}
-                      {order.status === 'Pending' && 'Waiting'}
-                    </p>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                    <div className="bg-gray-50 rounded-xl p-2.5 border border-gray-100">
-                      <p className="text-lg font-extrabold text-primary">{doneMilestones}</p>
-                      <p className="text-[9px] font-bold text-gray-400 uppercase">Steps Done</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-2.5 border border-gray-100">
-                      <p className="text-lg font-extrabold text-primary">{totalMilestones - doneMilestones}</p>
-                      <p className="text-[9px] font-bold text-gray-400 uppercase">Remaining</p>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-4">
-                  <FaUserCircle className="text-6xl text-gray-200 mx-auto mb-3" />
-                  <h3 className="font-bold text-gray-700">Performer Assign Hona Hai</h3>
-                  <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-                    Admin jald hi ek verified performer assign kare ga. Us ke baad yahan performer ki details aur live progress nazar aayegi.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Hadiyah Note */}
-          {order.hadiyah > 0 && (
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-2 text-sm"><FaGift className="text-accent" /> Hadiyah (Gift)</h3>
-              <p className="text-sm text-gray-600">Aap ne performer ke liye <span className="font-bold text-green-600">PKR {order.hadiyah.toLocaleString()}</span> hadiyah bheja hai. JazakAllah Khair!</p>
-            </div>
-          )}
-
-          {/* Trust Note */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-2 text-sm"><FaLock className="text-primary" /> 100% Transparent</h3>
-            <p className="text-xs text-gray-500 leading-relaxed">Har milestone par video proof upload hota hai jo aap upar timeline se dekh sakte hain. GPS location verification ke sath — 100% Shariah-compliant aur transparent system.</p>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
-};
-
-export default TrackOrderPage;
+}

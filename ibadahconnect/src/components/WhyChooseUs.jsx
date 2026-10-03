@@ -1,13 +1,14 @@
-import { FaCalendarCheck, FaQuran, FaBookOpen, FaHandHoldingHeart, FaBell, FaVideo, FaLaptop, FaShieldAlt } from 'react-icons/fa';
+import { FaCalendarCheck, FaQuran, FaBookOpen, FaHandHoldingHeart, FaBell, FaVideo, FaLaptop, FaShieldAlt, FaMoneyBillWave, FaBolt, FaCertificate } from 'react-icons/fa';
 
 const features = [
-  { icon: <FaCalendarCheck />, title: "Year-Round Service", desc: "Available throughout the year, no matter the season or circumstance." },
+  { icon: <FaBookOpen />, title: "Performed by Students", desc: "Umrah Badal is carried out by verified students of Islamic universities in Makkah, with sincerity and full understanding of the ritual." },
+  { icon: <FaMoneyBillWave />, title: "Affordable Pricing", desc: "Because dedicated students perform the ibadah, we can offer lower prices without compromising on quality or responsibility." },
+  { icon: <FaHandHoldingHeart />, title: "Spiritual Connection", desc: "For our performers this is a good deed as much as a duty, which adds sincerity and meaning to every ritual performed." },
+  { icon: <FaVideo />, title: "Photo & Video Report", desc: "Once complete, you receive a full video/photo report from the pilgrimage sites as confirmation." },
+  { icon: <FaBolt />, title: "Instant Auto-Assignment", desc: "As soon as you book, our system automatically assigns the best available verified performer — no waiting required." },
+  { icon: <FaCertificate />, title: "Auto-Generated Certificate", desc: "A certificate of completion is generated automatically once your Ibadah is finished, ready to download." },
   { icon: <FaQuran />, title: "Shariah Compliance", desc: "Every Umrah rite is conducted in full accordance with Shariah." },
-  { icon: <FaBookOpen />, title: "Performed by Team", desc: "Umrah Badal is carried out by dedicated students of knowledge in Makkah." },
-  { icon: <FaHandHoldingHeart />, title: "Dedicated Intention", desc: "Performed with a clear and sincere intention on behalf of the specified individual." },
-  { icon: <FaBell />, title: "Regular Updates", desc: "Receive timely notifications and confirmations to keep you informed." },
-  { icon: <FaVideo />, title: "Video Confirmation", desc: "We provide video documentation of the Umrah being performed." },
-  { icon: <FaLaptop />, title: "Convenient Online Booking", desc: "Easily book your Umrah Badal through our secure online platform." },
+  { icon: <FaCalendarCheck />, title: "Completed in 3–4 Days", desc: "Most Umrah Badal requests are completed within 3 to 4 days of assignment." },
   { icon: <FaShieldAlt />, title: "Trusted Service", desc: "We’ve earned the trust of Muslims worldwide for our reliability and sincerity." }
 ];
 

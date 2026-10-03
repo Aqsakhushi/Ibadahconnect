@@ -2,17 +2,40 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const User = require('../models/User');
+const generateCertificate = require('../utils/generateCertificate');
 
 const router = express.Router();
 
-/* Package model (agar models/Package mojood ho to wohi use hoga) */
+/* ══════════════════════════════════════════════════════════════
+   AUTO CERTIFICATE HELPER (Feature #4)
+   ══════════════════════════════════════════════════════════════ */
+const ensureCertificate = async (order) => {
+  try {
+    if (order.certificateUrl) return order.certificateUrl;
+    const [sponsor, performer] = await Promise.all([
+      order.sponsor ? User.findById(order.sponsor).select('firstName lastName').lean() : null,
+      order.performer ? User.findById(order.performer).select('firstName lastName').lean() : null,
+    ]);
+    const url = await generateCertificate(order, sponsor || {}, performer || {});
+    order.certificateUrl = url;
+    order.certificateGeneratedAt = new Date();
+    await order.save();
+    console.log(`[CERTIFICATE] Generated for order ${order.orderCode}: ${url}`);
+    return url;
+  } catch (e) {
+    console.error('CERTIFICATE GENERATION ERROR:', e.message);
+    return null;
+  }
+};
+
+/* Package model */
 let Package = null;
 try { Package = require('../models/Package'); } catch (e) { Package = null; }
 if (!Package) {
   Package = mongoose.models.Package || mongoose.model('Package', new mongoose.Schema({}, { strict: false, collection: 'packages' }));
 }
 
-/* Static services (frontend k otherServices se match) */
+/* Static services */
 const STATIC_SERVICES = {
   'hajj-badal': { title: 'Hajj Badal', price: 300000 },
   'wheelchair': { title: 'Wheelchair Donation', price: 25000 },
@@ -29,7 +52,7 @@ const detectType = (title = '') => {
   return 'Donation';
 };
 
-/* ============ DEFAULT MILESTONES (service type ke hisaab se auto-generate) ============ */
+/* ============ DEFAULT MILESTONES ============ */
 const MILESTONE_TEMPLATES = {
   'Umrah Badal': [
     'Niyyah & Ihram — intention recorded',
@@ -64,15 +87,10 @@ const buildMilestones = (serviceType) =>
 
 /* ══════════════════════════════════════════════════════════════
    AUTO-ASSIGNMENT ENGINE (Feature #3)
-   Sponsor book kare -> system khud best verified performer assign karta hai.
-   Eligibility: Performer role + email verified + admin verified
-   Rules (accept-task wale hi): apna order nahi, 1 active task, daily limit 1
-   Scoring: CNIC verified = +50, city match = +20
    ══════════════════════════════════════════════════════════════ */
-const AUTO_ASSIGN_ON_CHECKOUT = true; // false karo to sirf payment confirm ke baad assign hoga
+const AUTO_ASSIGN_ON_CHECKOUT = true;
 
 const findBestPerformer = async (order) => {
-  /* Eligibility — landing page ka waada: "Every performer is verified" */
   const candidates = await User.find({
     role: 'Performer',
     isEmailVerified: true,
@@ -86,14 +104,12 @@ const findBestPerformer = async (order) => {
 
   const eligible = [];
   for (const c of candidates) {
-    /* Rule: ek waqt mein sirf 1 active task */
     const active = await Order.findOne({
       performer: c._id,
       status: { $in: ['Assigned', 'In Progress'] },
     }).lean();
     if (active) continue;
 
-    /* Rule: daily limit — 1 din = 1 completed task */
     const todaysDone = await Order.findOne({
       performer: c._id,
       status: 'Completed',
@@ -105,7 +121,6 @@ const findBestPerformer = async (order) => {
   }
   if (!eligible.length) return null;
 
-  /* Scoring: best performer pehle */
   const orderCity = ((order.requestorAddress && order.requestorAddress.city) || '').toLowerCase();
   const scored = eligible.map((c) => {
     let score = 0;
@@ -192,7 +207,6 @@ router.post('/', async (req, res) => {
         paymentStatus: 'Unpaid',
       });
 
-      /* ═══ Feature #3: AUTO ASSIGNMENT — order bante hi best performer assign ═══ */
       if (AUTO_ASSIGN_ON_CHECKOUT) {
         try { await autoAssignOrder(order); } catch (e) { console.error('AUTO-ASSIGN ERROR:', e.message); }
       }
@@ -220,7 +234,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-/* ============ PUT /api/orders/:id/pay — Demo Payment Confirm + Auto-Assign (Feature #3) ============ */
+/* ============ PUT /api/orders/:id/pay — Demo Payment Confirm + Auto-Assign ============ */
 router.put('/:id/pay', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -232,7 +246,6 @@ router.put('/:id/pay', async (req, res) => {
     if (!order.paymentRef) order.paymentRef = 'DEMO-' + Date.now();
     await order.save();
 
-    /* Payment ke baad agar abhi bhi Pending hai to AB assign karo (payment -> assign story) */
     let assigned = null;
     if (!order.performer || order.status === 'Pending') {
       try {
@@ -257,7 +270,7 @@ router.put('/:id/pay', async (req, res) => {
   }
 });
 
-/* ============ GET /api/orders/mine?userId= — Sponsor ke orders ============ */
+/* ============ GET /api/orders/mine — Sponsor ke orders ============ */
 router.get('/mine', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -285,8 +298,8 @@ const getAllOrders = async (req, res) => {
     res.status(500).json({ message: e.message });
   }
 };
-router.get('/all', getAllOrders); // Performer Dashboard
-router.get('/', getAllOrders);    // Admin (sab orders)
+router.get('/all', getAllOrders);
+router.get('/', getAllOrders);
 
 /* ============ PUT /api/orders/accept-task/:id — Performer accept (ROLE GUARD) ============ */
 router.put('/accept-task/:id', async (req, res) => {
@@ -296,7 +309,6 @@ router.put('/accept-task/:id', async (req, res) => {
       return res.status(400).json({ message: 'Performer ID required.' });
     }
 
-    /* RULE: Sponsor account kabhi performer nahi ban sakta — sirf 'Performer' role accept kar sakta hai */
     const performer = await User.findById(performerId).lean();
     if (!performer) return res.status(404).json({ message: 'Performer account not found.' });
     if (String(performer.role || '').toLowerCase() !== 'performer') {
@@ -310,12 +322,10 @@ router.put('/accept-task/:id', async (req, res) => {
       return res.status(409).json({ message: 'This task was just accepted by another performer.' });
     }
 
-    /* ═══ RULE 1: "log same ni hon" — performer apna hi order accept nahi kar sakta ═══ */
     if (String(order.sponsor) === String(performerId)) {
       return res.status(403).json({ message: 'You cannot accept your own request.' });
     }
 
-    /* ═══ RULE 2: ek waqt mein sirf 1 active task (current order chhor kar check) ═══ */
     const activeTask = await Order.findOne({
       performer: performerId,
       status: { $in: ['Assigned', 'In Progress'] },
@@ -325,7 +335,6 @@ router.put('/accept-task/:id', async (req, res) => {
       return res.status(409).json({ message: 'You already have an active task. Complete it first — only 1 task at a time.' });
     }
 
-    /* ═══ RULE 3: daily limit — 1 din = sirf 1 task (aaj complete kiya ho to agla kal) ═══ */
     const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
     const todaysTask = await Order.findOne({
@@ -338,7 +347,6 @@ router.put('/accept-task/:id', async (req, res) => {
       return res.status(409).json({ message: 'Daily limit reached — you can accept only 1 task per day. Please come back tomorrow.' });
     }
 
-    /* Milestones auto-generate (checkout wale orders me empty hote hain) */
     if (!order.milestones || order.milestones.length === 0) {
       order.milestones = buildMilestones(order.serviceType);
     }
@@ -391,11 +399,17 @@ router.put('/update-milestone/:id', async (req, res) => {
     }
 
     await order.save();
+
+    if (done === total) {
+      await ensureCertificate(order);
+    }
+
     res.json({
-      message: done === total ? 'Order completed! Sponsor notified.' : 'Milestone updated.',
+      message: done === total ? 'Order completed! Certificate generated & sponsor notified.' : 'Milestone updated.',
       orderCompleted: done === total,
       completedMilestones: done,
       totalMilestones: total,
+      certificateUrl: order.certificateUrl || null,
     });
   } catch (e) {
     res.status(500).json({ message: e.message || 'Failed to update milestone' });
@@ -412,6 +426,11 @@ router.put('/:id/status', async (req, res) => {
     if (status === 'Completed') updates.completedAt = new Date();
     const order = await Order.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    if (status === 'Completed') {
+      await ensureCertificate(order);
+    }
+
     res.json(order);
   } catch (e) {
     res.status(500).json({ message: e.message });
@@ -432,7 +451,82 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-/* ============ GET /api/orders/:id — single (ObjectId YA orderCode dono chalega = Sponsor Tracking) ============ */
+/* ══════════════════════════════════════════════════════════════
+   LIVE TRACKING (inDrive-style) — Feature #5
+   PUT /api/orders/:id/location
+   Performer har 5 sec apni GPS location bhejta hai (frontend
+   TrackOrderPage se). ObjectId YA orderCode dono chalte hain.
+   Location Order.currentLocation me save hoti hai — wahi field
+   jo milestones complete hone par use hoti hai, is liye KOI
+   SCHEMA CHANGE NAHI chahiye.
+   ══════════════════════════════════════════════════════════════ */
+router.put('/:id/location', async (req, res) => {
+  try {
+    const lat = Number(req.body.latitude);
+    const lng = Number(req.body.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ message: 'latitude and longitude are required.' });
+    }
+
+    let order = null;
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      order = await Order.findById(req.params.id);
+    }
+    if (!order) {
+      order = await Order.findOne({ orderCode: req.params.id });
+    }
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    order.currentLocation = {
+      lat,
+      lng,
+      updatedAt: new Date().toISOString(),
+    };
+    await order.save();
+
+    res.json({
+      message: 'Location updated',
+      location: { latitude: lat, longitude: lng, updatedAt: order.currentLocation.updatedAt },
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message || 'Failed to update location' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   GET /api/orders/:id/location
+   Sponsor har 5 sec yahan se latest location fetch karta hai.
+   Response shape frontend TrackOrderPage ke mutabiq:
+   { location: { latitude, longitude, updatedAt } }
+   ══════════════════════════════════════════════════════════════ */
+router.get('/:id/location', async (req, res) => {
+  try {
+    let order = null;
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      order = await Order.findById(req.params.id).select('currentLocation').lean();
+    }
+    if (!order) {
+      order = await Order.findOne({ orderCode: req.params.id }).select('currentLocation').lean();
+    }
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    const cl = order.currentLocation;
+    if (!cl || typeof cl.lat !== 'number' || typeof cl.lng !== 'number') {
+      return res.json({ location: null, message: 'Performer ki location abhi share nahi hui.' });
+    }
+    res.json({
+      location: {
+        latitude: cl.lat,
+        longitude: cl.lng,
+        updatedAt: cl.updatedAt,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message || 'Failed to fetch location' });
+  }
+});
+
+/* ============ GET /api/orders/:id — single (ObjectId YA orderCode) ============ */
 router.get('/:id', async (req, res) => {
   try {
     let order = null;
