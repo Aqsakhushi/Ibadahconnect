@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import API from '../api';
+import { getCurrentUser } from '../utils/auth';
 import {
   FaLock, FaKaaba, FaPlus, FaMinus, FaTrash, FaCheckCircle,
   FaShieldAlt, FaUniversity, FaHeadset, FaShoppingBag,
@@ -50,21 +52,10 @@ const TRUST_ITEMS = [
 
 // Logged-in user — LoginPage 'user' key + auth-helpers 'ibadahUser' key, dono support
 function getStoredUser() {
-  const KEYS = ['user', 'ibadahUser', 'currentUser'];
-  for (const key of KEYS) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      let parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && parsed.user) parsed = parsed.user;
-      if (parsed && (parsed.email || parsed._id || parsed.id)) {
-        return { ...parsed, id: parsed.id || parsed._id, role: parsed.role || 'Sponsor' };
-      }
-    } catch {
-      /* ignore broken json */
-    }
-  }
-  return null;
+  const parsed = getCurrentUser();
+  return parsed && (parsed.email || parsed._id || parsed.id)
+    ? { ...parsed, id: parsed.id || parsed._id, role: parsed.role || 'Sponsor' }
+    : null;
 }
 
 // Billing form — logged-in user k data se autofill
@@ -172,10 +163,7 @@ export default function CheckoutPage() {
 
     try {
       /* EXACT backend contract — backend/routes/orders.js POST / */
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data } = await API.post('/orders', {
           userId: user.id, // backend body se userId mangta hai
           billing: {
             fullName: billing.fullName,
@@ -191,10 +179,7 @@ export default function CheckoutPage() {
           })),
           hadiyah: hadiyah.amount, // backend NUMBER expect karta hai
           paymentMethod: 'Bank Transfer',
-        }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || 'Order could not be placed. Please try again.');
       // Backend orderCodes[] (array) aur total return karta hai
       if (Array.isArray(data.orderCodes) && data.orderCodes.length) {
         snapshot.orderNumber = data.orderCodes.join(', ');

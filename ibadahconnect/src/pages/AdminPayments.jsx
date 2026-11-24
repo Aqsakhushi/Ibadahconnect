@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import API from '../api/axios';
 import { getCurrentUser } from '../utils/auth';
 import toast from 'react-hot-toast';
@@ -15,11 +15,11 @@ export default function AdminPayments() {
   const isAdmin = String(current?.role || '').toLowerCase() === 'admin';
 
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(isAdmin);
   const [filter, setFilter] = useState('Under Review');
   const [busy, setBusy] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const r = await API.get('/orders');
       setOrders(Array.isArray(r.data) ? r.data : []);
@@ -28,12 +28,11 @@ export default function AdminPayments() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isAdmin) load();
-    else setLoading(false);
-  }, []);
+  }, [isAdmin, load]);
 
   const verify = async (code, action) => {
     setBusy(code + action);

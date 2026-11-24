@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
+import API from '../api';
+import { getCurrentUser, logout } from '../utils/auth';
 
 const NAV_LINKS = [
   { to: '/', label: 'Home' },
-  { key: 'umrah', label: 'Umrah & Hajj', dropdown: true },
-  { key: 'donate', label: 'Donate in Mecca', dropdown: true },
-  { to: '/dashboard', label: 'All Services' },
+  { to: '/services', label: 'All Services' },
   { to: '/how-it-works', label: 'About Us' },
-  { to: '/faqs', label: 'Resources' },
+  { to: '/guide', label: 'Guidelines' },
+  { to: '/faqs', label: 'FAQs' },
 ];
 
 /* ---------------- inline SVG icons (no emoji, no extra deps) ---------------- */
@@ -121,7 +122,7 @@ const getRoleLinks = (role) => {
 /* --------------------------------- NAVBAR ---------------------------------- */
 
 const Navbar = ({ openModal }) => {
-  const user = JSON.parse(localStorage.getItem('user'));
+  const user = getCurrentUser();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -129,38 +130,58 @@ const Navbar = ({ openModal }) => {
   const [scrolled, setScrolled] = useState(false);
   const menuRef = useRef(null);
 
-  // DB-driven dropdowns + cart
-  const [openDrop, setOpenDrop] = useState(null);   // 'umrah' | 'donate' | null
-  const [mobileSub, setMobileSub] = useState(null); // mobile accordion
-  const [pkgs, setPkgs] = useState([]);
+  // Cart
   const [cartCount, setCartCount] = useState(0);
-  const dropRef = useRef(null);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const notificationRef = useRef(null);
 
   const role = user?.role || 'Sponsor';
   const roleLinks = getRoleLinks(role);
   const initial = user?.firstName ? user.firstName[0].toUpperCase() : 'U';
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    logout();
     setMenuOpen(false);
     setMobileOpen(false);
     navigate('/');
   };
 
-  // Packages DB se (admin jo bhi add kare, dropdown me khud show hoga)
   useEffect(() => {
+    if (!user || role !== 'Sponsor') {
+      setNotifications([]);
+      return undefined;
+    }
     let alive = true;
-    fetch('http://localhost:5000/api/packages/all')
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive) return;
-        const list = Array.isArray(d) ? d : (d.packages || d.data || []);
-        setPkgs(list);
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
+    const refreshNotifications = async () => {
+      try {
+        const { data } = await API.get('/orders/mine');
+        const orders = Array.isArray(data) ? data : data.orders || [];
+        const items = [];
+        orders.forEach((order) => {
+          const code = order.orderCode || order._id;
+          const who = order.name || order.beneficiaryName || 'your loved one';
+          const time = order.updatedAt || order.createdAt;
+          if (order.status === 'Completed') {
+            items.push({ id: `${order._id}-done`, title: 'Ibadah completed', body: `Order ${code} has been completed.`, time });
+          } else if (['In Progress', 'Assigned'].includes(order.status)) {
+            items.push({ id: `${order._id}-progress`, title: 'Ibadah in progress', body: `The Ibadah for ${who} (${code}) is being performed.`, time });
+          } else if (order.paymentStatus === 'Paid') {
+            items.push({ id: `${order._id}-paid`, title: 'Payment received', body: `We have received payment for order ${code}.`, time: order.paidAt || time });
+          } else if (order.createdAt) {
+            items.push({ id: `${order._id}-booked`, title: 'Booking confirmed', body: `Your booking for ${who} (${code}) is confirmed.`, time: order.createdAt });
+          }
+        });
+        items.sort((a, b) => new Date(b.time) - new Date(a.time));
+        if (alive) setNotifications(items);
+      } catch (error) {
+        if (alive) setNotifications([]);
+      }
+    };
+    refreshNotifications();
+    const timer = setInterval(refreshNotifications, 30000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [role, user?.id]);
 
   // Cart count (localStorage) — cart badalne pe navbar badge khud update
   const refreshCart = () => {
@@ -184,8 +205,6 @@ const Navbar = ({ openModal }) => {
   useEffect(() => {
     setMenuOpen(false);
     setMobileOpen(false);
-    setOpenDrop(null);
-    setMobileSub(null);
   }, [location.pathname]);
 
   // Escape key se menu band
@@ -194,7 +213,6 @@ const Navbar = ({ openModal }) => {
       if (event.key === 'Escape') {
         setMenuOpen(false);
         setMobileOpen(false);
-        setOpenDrop(null);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -205,7 +223,7 @@ const Navbar = ({ openModal }) => {
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false);
-      if (dropRef.current && !dropRef.current.contains(event.target)) setOpenDrop(null);
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) setNotificationOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -224,19 +242,10 @@ const Navbar = ({ openModal }) => {
     return to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
   };
 
-  // DB packages ko categories me baanta (category badalne se dropdown khud badlega)
-  const umrahPkgs = pkgs.filter((p) => p.category === 'Umrah Badal');
-  const hajjPkgs = pkgs.filter((p) => p.category === 'Hajj Badal');
-  const donatePkgs = pkgs.filter((p) => p.category !== 'Umrah Badal' && p.category !== 'Hajj Badal');
+  const itemCls = 'group flex items-center gap-3 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-[#1B5E20] transition-colors cursor-pointer';
 
-  const itemCls = 'group flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50/70 hover:text-[#1B5E20] transition-all duration-200 cursor-pointer hover:pl-5';
+  const sectionLbl = 'px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400';
 
-  const sectionLbl = 'px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400';
-
-  // name-only dropdown item — clean alignment, gold dot accent, koi price nahi
-  const dropItemCls = 'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-emerald-50/70 hover:text-[#1B5E20] transition-all duration-200 cursor-pointer';
-
-  const colLbl = 'px-3 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-[#8a6d1a]';
 
   // Cart button (logged in / out dono ke liye)
   const cartBtn = (
@@ -265,87 +274,21 @@ const Navbar = ({ openModal }) => {
         </Link>
 
         {/* desktop links — flex-1 + justify-center = menu hamesha beech m centered */}
-        <div className="hidden xl:flex flex-1 items-center justify-center gap-1.5" ref={dropRef}>
-          {NAV_LINKS.map((l) =>
-            l.dropdown ? (
-              <div key={l.key} className="relative">
-                <button
-                  onClick={() => setOpenDrop(openDrop === l.key ? null : l.key)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                    openDrop === l.key ? 'bg-emerald-50 text-[#1B5E20]' : 'text-gray-600 hover:text-[#1B5E20] hover:bg-gray-50'
-                  }`}
-                >
-                  {l.label}
-                  <ChevronIcon open={openDrop === l.key} />
-                </button>
-
-                {openDrop === l.key && l.key === 'umrah' && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 w-[560px] bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-50 max-h-[65vh] overflow-y-auto origin-top animate-[navDrop_.18s_ease-out]">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className={colLbl}>Umrah Badal</p>
-                        <div className="space-y-0.5">
-                          {umrahPkgs.map((p) => (
-                            <Link key={p._id} to={`/service/${p._id}`} onClick={() => setOpenDrop(null)} className={dropItemCls}>
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/50 group-hover:bg-[#D4AF37] transition-colors shrink-0" />
-                              <span className="font-semibold truncate">{p.title}</span>
-                            </Link>
-                          ))}
-                          {umrahPkgs.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Loading packages...</p>}
-                        </div>
-                      </div>
-                      <div>
-                        <p className={colLbl}>Hajj Badal</p>
-                        <div className="space-y-0.5">
-                          {hajjPkgs.map((p) => (
-                            <Link key={p._id} to={`/service/${p._id}`} onClick={() => setOpenDrop(null)} className={dropItemCls}>
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/50 group-hover:bg-[#D4AF37] transition-colors shrink-0" />
-                              <span className="font-semibold truncate">{p.title}</span>
-                            </Link>
-                          ))}
-                          {hajjPkgs.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Loading packages...</p>}
-                        </div>
-                      </div>
-                    </div>
-                    <Link to="/dashboard" onClick={() => setOpenDrop(null)} className="block mt-3 pt-3 border-t border-gray-100 text-center text-xs font-bold text-[#1B5E20] hover:text-[#D4AF37] transition-colors">
-                      View All Services →
-                    </Link>
-                  </div>
-                )}
-
-                {openDrop === l.key && l.key === 'donate' && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 w-[380px] bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-50 max-h-[65vh] overflow-y-auto origin-top animate-[navDrop_.18s_ease-out]">
-                    <p className={colLbl}>Sadaqah & Donations</p>
-                    <div className="space-y-0.5">
-                      {donatePkgs.map((p) => (
-                        <Link key={p._id} to={`/service/${p._id}`} onClick={() => setOpenDrop(null)} className={dropItemCls}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/50 group-hover:bg-[#D4AF37] transition-colors shrink-0" />
-                          <span className="font-semibold truncate">{p.title}</span>
-                        </Link>
-                      ))}
-                      {donatePkgs.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Loading packages...</p>}
-                    </div>
-                    <Link to="/donations" onClick={() => setOpenDrop(null)} className="block mt-3 pt-3 border-t border-gray-100 text-center text-xs font-bold text-[#1B5E20] hover:text-[#D4AF37] transition-colors">
-                      Donation Page →
-                    </Link>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <Link
-                key={l.to}
-                to={l.to}
-                className={`relative group flex items-center px-3.5 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                  isActive(l.to)
-                    ? 'bg-emerald-50 text-[#1B5E20]'
-                    : 'text-gray-600 hover:text-[#1B5E20] hover:bg-gray-50'
-                }`}
-              >
-                {l.label}
-                <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 h-[2px] rounded-full bg-[#D4AF37] transition-all duration-300 ${isActive(l.to) ? 'w-5' : 'w-0 group-hover:w-5'}`} />
-              </Link>
-            )
-          )}
+        <div className="hidden xl:flex flex-1 items-center justify-center gap-1.5">
+          {NAV_LINKS.map((l) => (
+            <Link
+              key={l.to}
+              to={l.to}
+              className={`relative group flex items-center px-3.5 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                isActive(l.to)
+                  ? 'bg-emerald-50 text-[#1B5E20]'
+                  : 'text-gray-600 hover:text-[#1B5E20] hover:bg-gray-50'
+              }`}
+            >
+              {l.label}
+              <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 h-[2px] rounded-full bg-[#D4AF37] transition-all duration-300 ${isActive(l.to) ? 'w-5' : 'w-0 group-hover:w-5'}`} />
+            </Link>
+          ))}
         </div>
 
         <div className="flex items-center gap-2">
@@ -358,10 +301,60 @@ const Navbar = ({ openModal }) => {
 
               {cartBtn}
 
-              <button title="Notifications" className="relative p-2 text-gray-500 hover:text-[#1B5E20] transition-colors">
-                <BellIcon />
-                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />
-              </button>
+              <div className="relative" ref={notificationRef}>
+                <button
+                  type="button"
+                  title="Notifications"
+                  aria-label="Notifications"
+                  aria-expanded={notificationOpen}
+                  onClick={() => setNotificationOpen((open) => !open)}
+                  className="relative p-2 text-gray-500 hover:text-[#1B5E20] transition-colors"
+                >
+                  <BellIcon />
+                  {notifications.length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#C8A94B] text-white text-[10px] font-bold flex items-center justify-center border-2 border-white">
+                      {notifications.length > 9 ? '9+' : notifications.length}
+                    </span>
+                  )}
+                </button>
+                {notificationOpen && (
+                  <div className="absolute right-0 top-full mt-3 w-[360px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl border border-gray-100 shadow-2xl shadow-emerald-950/10 overflow-hidden" style={{ animation: 'navDrop .16s ease-out both' }}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">Notifications</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Latest Ibadah updates</p>
+                      </div>
+                      <Link
+                        to="/notifications"
+                        onClick={() => setNotificationOpen(false)}
+                        className="text-xs font-bold text-[#1B5E20] hover:text-[#8a6d1a]"
+                      >
+                        View all
+                      </Link>
+                    </div>
+                    {notifications.length === 0 ? (
+                      <div className="px-5 py-8 text-center">
+                        <p className="text-sm font-bold text-gray-700">No new notifications</p>
+                        <p className="text-xs text-gray-400 mt-1">Your Ibadah updates will appear here.</p>
+                      </div>
+                    ) : (
+                      <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+                        {notifications.slice(0, 6).map((notification) => (
+                          <Link
+                            key={notification.id}
+                            to="/notifications"
+                            onClick={() => setNotificationOpen(false)}
+                            className="block px-5 py-4 hover:bg-gray-50 transition-colors"
+                          >
+                            <p className="text-sm font-bold text-gray-900">{notification.title}</p>
+                            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{notification.body}</p>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Profile Dropdown */}
               <div className="relative" ref={menuRef}>
@@ -374,11 +367,11 @@ const Navbar = ({ openModal }) => {
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 mt-3 w-72 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 overflow-hidden origin-top-right animate-[navDrop_.18s_ease-out]">
-                    {/* header: avatar + name + email + role chip */}
-                    <div className="px-4 py-3.5 border-b border-gray-100 bg-gradient-to-r from-emerald-50/80 via-emerald-50/30 to-transparent">
+                  <div className="absolute right-0 mt-3 w-72 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden flex flex-col max-h-[calc(100vh-6rem)] origin-top-right animate-[navDrop_.18s_ease-out]">
+                    {/* header: avatar + name + email + role */}
+                    <div className="px-4 py-3 border-b border-gray-100 shrink-0">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2E7D32] to-[#1B5E20] ring-2 ring-[#D4AF37]/60 flex items-center justify-center text-white font-bold shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2E7D32] to-[#1B5E20] flex items-center justify-center text-white font-bold shrink-0">
                           {initial}
                         </div>
                         <div className="min-w-0">
@@ -386,14 +379,13 @@ const Navbar = ({ openModal }) => {
                           <p className="text-xs text-gray-400 truncate">{user?.email}</p>
                         </div>
                       </div>
-                      <span className="inline-flex items-center gap-1.5 mt-2.5 px-2.5 py-1 rounded-full bg-[#D4AF37]/15 text-[#8a6d1a] text-[11px] font-bold uppercase tracking-wide ring-1 ring-[#D4AF37]/40">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]" />
+                      <span className="inline-block mt-2 px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-bold uppercase tracking-wide">
                         {role}
                       </span>
                     </div>
 
-                    {/* main menu */}
-                    <p className={sectionLbl}>Menu</p>
+                    {/* v8.2: scrollable menu — chhoti screen par bhi poori list scroll se accessible */}
+                    <div className="py-1.5 overflow-y-auto">
                     <Link to="/dashboard" onClick={() => setMenuOpen(false)} className={itemCls}>
                       <GridIcon /> Dashboard
                     </Link>
@@ -431,9 +423,10 @@ const Navbar = ({ openModal }) => {
                       <DocIcon /> Personal Information
                     </Link>
 
-                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 border-t border-gray-100 mt-1 cursor-pointer transition-colors">
+                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-500 hover:bg-red-50 hover:text-red-500 border-t border-gray-100 mt-1 cursor-pointer transition-colors">
                       <LogoutIcon /> Logout
                     </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -463,61 +456,16 @@ const Navbar = ({ openModal }) => {
       {/* mobile menu panel */}
       {mobileOpen && (
         <div className="xl:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-1 shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto">
-          {NAV_LINKS.map((l) =>
-            l.dropdown ? (
-              <div key={l.key}>
-                <button
-                  onClick={() => setMobileSub(mobileSub === l.key ? null : l.key)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
-                    mobileSub === l.key ? 'bg-emerald-50 text-[#1B5E20]' : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {l.label}
-                  <ChevronIcon open={mobileSub === l.key} />
-                </button>
-
-                {mobileSub === l.key && (
-                  <div className="pl-4 pr-1 pb-1 max-h-60 overflow-y-auto space-y-0.5">
-                    {l.key === 'umrah' ? (
-                      <>
-                        <p className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#8a6d1a]">Umrah Badal</p>
-                        {umrahPkgs.map((p) => (
-                          <Link key={p._id} to={`/service/${p._id}`} onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-[13px] font-semibold text-gray-500 hover:bg-gray-50">
-                            {p.title}
-                          </Link>
-                        ))}
-                        <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#8a6d1a]">Hajj Badal</p>
-                        {hajjPkgs.map((p) => (
-                          <Link key={p._id} to={`/service/${p._id}`} onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-[13px] font-semibold text-gray-500 hover:bg-gray-50">
-                            {p.title}
-                          </Link>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        <p className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#8a6d1a]">Sadaqah & Donations</p>
-                        {donatePkgs.map((p) => (
-                          <Link key={p._id} to={`/service/${p._id}`} onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-lg text-[13px] font-semibold text-gray-500 hover:bg-gray-50">
-                            {p.title}
-                          </Link>
-                        ))}
-                      </>
-                    )}
-                    {pkgs.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Loading packages...</p>}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <Link
-                key={l.to}
-                to={l.to}
-                onClick={() => setMobileOpen(false)}
-                className={`block px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${isActive(l.to) ? 'bg-emerald-50 text-[#1B5E20]' : 'text-gray-600 hover:bg-gray-50'}`}
-              >
-                {l.label}
-              </Link>
-            )
-          )}
+          {NAV_LINKS.map((l) => (
+            <Link
+              key={l.to}
+              to={l.to}
+              onClick={() => setMobileOpen(false)}
+              className={`block px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${isActive(l.to) ? 'bg-emerald-50 text-[#1B5E20]' : 'text-gray-600 hover:bg-gray-50'}`}
+            >
+              {l.label}
+            </Link>
+          ))}
 
           <Link
             to="/dashboard"
@@ -526,7 +474,14 @@ const Navbar = ({ openModal }) => {
           >
             Book Now
           </Link>
-
+<div className="navDrop">
+  <span>Guide ▾</span>
+  <div className="navDrop-menu">
+    <button onClick={() => navigate("/guide/umrah-badal")}>Umrah Badal Guide</button>
+    <button onClick={() => navigate("/guide/hajj-badal")}>Hajj Badal Guide</button>
+    <button onClick={() => navigate("/guide/donations")}>Donations Guide</button>
+  </div>
+</div>
           {user ? (
             <>
               <p className={sectionLbl}>Account</p>

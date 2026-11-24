@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   FaKaaba, FaCheckCircle, FaPhoneAlt, FaHandsHelping, FaSearch, FaEnvelope, FaMapMarkerAlt
@@ -69,7 +69,7 @@ function CtaBand() {
   );
 }
 
-function PageFooter() {
+export function PageFooter() {
   return (
     <footer className="bg-[#08240C] text-white/70">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
@@ -252,7 +252,6 @@ function FaqsPage() {
       />
       <FaqsContent />
       <CtaBand />
-      <PageFooter />
     </PageShell>
   );
 }

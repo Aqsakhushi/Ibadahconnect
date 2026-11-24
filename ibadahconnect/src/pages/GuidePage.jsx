@@ -1,774 +1,468 @@
-/* ==========================================================================
-   IbadahConnect — Hajj & Umrah Guide (3-Level: Hub → Category → Subcategory)
-   --------------------------------------------------------------------------
-   ROUTE SETUP (App.jsx mein yeh 3 lines add karo):
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import Navbar from "../components/Navbar";
+import Footer from "../components/Footer";
 
-   import GuidePage from "./pages/GuidePage";
-   <Route path="/guide" element={<GuidePage />} />
-   <Route path="/guide/:categorySlug" element={<GuidePage />} />
-   <Route path="/guide/:categorySlug/:subSlug" element={<GuidePage />} />
-
-   Header/Footer mein link:  <Link to="/guide">Guide</Link>
-   ========================================================================== */
-
-import React, { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-
-/* ============================== DATA ==================================== */
-
+// ---------- GUIDE DATA (thepilgrim-style: sections => articles) ----------
 const GUIDE_DATA = [
   {
-    slug: "planning-preparation",
-    name: "Planning & Preparation",
-    icon: "📝",
-    articles: 19,
-    gradient: "linear-gradient(135deg,#0e7a4f 0%,#0a5536 100%)",
-    tint: "#e7f5ee",
-    chip: "#0d6b44",
-    desc: "A successful Hajj or Umrah begins with thoughtful planning and preparation. Discover the essential steps to take before you depart.",
-    subcategories: [
+    slug: "umrah-badal",
+    name: "Umrah Badal",
+    symbol: "🕋",
+    color: "#0d6b44",
+    tint: "#eaf5ef",
+    eyebrow: "Umrah Guide",
+    heroLine: "Take the first step of the holiest journey",
+    desc: "A complete guide to arranging Umrah for a deceased or permanently unable loved one.",
+    overview:
+      "Umrah Badal means arranging the lesser pilgrimage on behalf of someone who cannot perform it. The process begins with eligibility and intention, then moves through Niyyah, Ihram, Tawaf, Sa'i and Halq or Taqsir — with documented proof at every milestone.",
+    sections: [
       {
-        slug: "travel-agents", name: "Travel Agents", icon: "🏢", articles: 2, views: "5.2K", comments: 11,
-        about: "How to find, verify and book with a trustworthy Umrah & Hajj travel agent — and how to avoid scams.",
-        list: [
-          { t: "How to Choose a Reliable Umrah Travel Agent", e: "From checking government registration to reading verified reviews, here is a complete framework to pick an agent you can trust with your journey.", r: "6 min read" },
-          { t: "Red Flags When Booking Hajj & Umrah Packages", e: "Suspiciously cheap packages, no written contract, cash-only payments — learn the warning signs before you pay any advance.", r: "5 min read" },
+        slug: "umrah-overview",
+        name: "Umrah Badal Overview",
+        icon: "🕋",
+        about: "What Umrah Badal means, who may receive it and why the proof process matters.",
+        articles: [
+          { title: "What is Umrah Badal?", text: "Umrah Badal means arranging and performing Umrah on behalf of a deceased person or a living person who is permanently unable to perform it. The performer enters Ihram with the named beneficiary in mind according to the valid arrangement." },
+          { title: "Who can receive Umrah Badal?", text: "Common cases include deceased loved ones and people permanently unable to travel or complete the rituals due to age or serious illness. Individual eligibility should be confirmed with a qualified scholar." },
+          { title: "How long does completion take?", text: "The rituals themselves take roughly 45 minutes to 3 hours for a single Umrah, but for Badal the full schedule depends on the assigned performer, permitted crowd conditions and the package milestones. Your tracking page shows the live stage at all times." },
+          { title: "Virtue of Umrah", text: "The Prophet (peace be upon him) said that Umrah serves as an expiation for sins committed between consecutive Umrahs. This virtue is the reason many families arrange Umrah Badal for their loved ones — it carries the same reward framework when performed with a valid representation." },
+          { title: "Umrah Badal in Ramadan", text: "The Prophet (peace be upon him) said: Performance of Umrah in Ramadan is equivalent to Hajj, or he said: equal to performing Hajj with me. This merit extends to all the days and nights of Ramadan, so Ramadan slots are arranged first for eligible beneficiaries." },
+          { title: "Why is proof important?", text: "Sponsors receive milestone updates, photo and video proof, location records where required and a completion certificate, so the booking can be followed with total clarity from anywhere in the world." },
         ],
       },
       {
-        slug: "documents", name: "Documents", icon: "📄", articles: 1, views: "5.5K", comments: 6,
-        about: "Every document you need — passports, visas, certificates — organised into one simple checklist.",
-        list: [
-          { t: "Complete Document Checklist for Umrah 2026", e: "Passport validity, photographs, vaccination certificates, Mahram documents for women — the exact paperwork you need before applying.", r: "7 min read" },
+        slug: "umrah-glossary",
+        name: "Umrah Glossary",
+        icon: "📖",
+        about: "The essential Islamic terms used in Umrah Badal, explained simply.",
+        articles: [
+          { title: "Ihram", text: "Ihram is a sacred state that Muslim pilgrims enter before performing the rituals of Umrah. It involves cleansing acts, a specific dress and clear restrictions. A pilgrim cannot leave this state until Halq or Taqsir is completed." },
+          { title: "Niyyah", text: "The sincere intention to perform the Ibadah for a named beneficiary according to the valid representation. For Badal, the Niyyah names the person on whose behalf the pilgrimage is performed." },
+          { title: "Talbiyah", text: "The devotional declaration recited after entering Ihram: Labbaik Allahumma Labbaik. It is recited throughout the pilgrimage and affirms that the Umrah is performed for the glory of Allah alone." },
+          { title: "Tawaf", text: "Tawaf is the act of circumambulating the Holy Kaaba in an anti-clockwise direction — walking around it seven times as part of the Umrah rituals, reciting Takbir and supplications from the Sunnah." },
+          { title: "Sa'i", text: "Sa'i honours the struggle of Hajar (AS), the wife of Prophet Ibrahim (AS). It means walking between Safa and Marwah seven times, performed after Tawaf as a compulsory rite of Umrah." },
+          { title: "Halq or Taqsir", text: "Halq is shaving the entire head after completion and applies exclusively to men; Taqsir is shortening the hair. This is the final step after which the pilgrim exits the state of Ihram." },
         ],
       },
       {
-        slug: "health-medication", name: "Health & Medication", icon: "💊", articles: 2, views: "6.4K", comments: 14,
-        about: "Stay healthy on your journey — medicines, first-aid kits and managing health conditions in the Haramain.",
-        list: [
-          { t: "Carrying Prescription Medicines to Saudi Arabia", e: "Which medicines are restricted, how to get a doctor's letter, and the right way to pack your medicines for air travel.", r: "5 min read" },
-          { t: "Build the Perfect Pilgrim First-Aid Kit", e: "From blister patches for your shoes to ORS for the heat — a practical kit list used by experienced pilgrims.", r: "4 min read" },
-        ],
-      },
-      { slug: "vaccinations", name: "Vaccinations", icon: "💉", articles: 0, views: "4.5K", comments: 4, about: "Required and recommended vaccines — MenACWY, flu, COVID-19 — and the certificate rules for your visa." },
-      {
-        slug: "physical-fitness", name: "Physical Fitness", icon: "🏃", articles: 13, views: "6.8K", comments: 7,
-        about: "Tawaf and Sa'i can mean 8–10 km of walking daily. Prepare your body weeks before you travel.",
-        list: [
-          { t: "8-Week Walking Plan Before Your Umrah", e: "Build stamina gradually with this simple week-by-week walking plan designed around your daily routine.", r: "6 min read" },
-          { t: "Simple Home Exercises for Pilgrims Over 50", e: "Low-impact strength and balance exercises that prepare your knees and back for the physical demands of the Haramain.", r: "7 min read" },
-          { t: "Staying Hydrated & Beating the Makkah Heat", e: "How much water to drink, electrolyte tips, and the best times to perform rituals in extreme temperatures.", r: "5 min read" },
-        ],
-      },
-      { slug: "baggage", name: "Baggage", icon: "🧳", articles: 0, views: "5.5K", comments: 5, about: "Airline baggage allowances, Zamzam water rules and smart packing strategies for pilgrims." },
-      { slug: "money-banking", name: "Money & Banking", icon: "💰", articles: 0, views: "4.8K", comments: 4, about: "Currency exchange, cards that work in Saudi Arabia, daily budgets and carrying money safely." },
-      {
-        slug: "clothing", name: "Clothing", icon: "🧥", articles: 5, views: "5.5K", comments: 4,
-        about: "What to pack for every season, footwear rules and comfortable modest clothing for the journey.",
-        list: [
-          { t: "Ultimate Packing List: Clothes for Umrah", e: "Layering strategy for changing temperatures, how many Ihram sets to bring, and laundry tips during your trip.", r: "6 min read" },
-          { t: "What Should Women Wear for Umrah & Hajj?", e: "Comfortable, modest clothing choices, footwear rules inside Haram, and abaya fabric that survives the heat.", r: "5 min read" },
+        slug: "umrah-preparation",
+        name: "Umrah Badal Preparation",
+        icon: "📋",
+        about: "Beneficiary details, package confirmation, permits and the intention at Miqat.",
+        articles: [
+          { title: "Step 1 — Confirm the person and ruling", text: "Record the full beneficiary name and confirm that the person is eligible for Umrah Badal. Ask a qualified scholar for a specific ruling when circumstances are unusual." },
+          { title: "Step 2 — Choose the correct package", text: "Review the performer, inclusions, number of proof milestones, schedule and certificate before confirming the order." },
+          { title: "Step 3 — Record Niyyah and any dua", text: "Provide the Niyyah and any special dua or instruction exactly as you want it recorded. This information is shared with the assigned performer." },
+          { title: "Step 4 — Enter Ihram at Miqat", text: "The representative enters Ihram at the appointed Miqat with the name and intention of the beneficiary." },
+          { title: "Step 5 — Complete the ritual sequence", text: "Tawaf, Sa'i and Halq or Taqsir are completed in the correct order, with milestone evidence submitted at each stage." },
+          { title: "Official permits & the Nusuk app", text: "Umrah permits and Haram reservations are managed through the official Nusuk app. For Badal, the assigned performer handles the permit booking — sponsors never need a Nusuk account; the booking appears on your order timeline." },
         ],
       },
       {
-        slug: "ihram", name: "Ihram", icon: "🤍", articles: 9, views: "7.8K", comments: 19,
-        about: "The sacred state — how to wear it, its prohibitions, and the common mistakes to avoid.",
-        list: [
-          { t: "How to Wear Ihram for Men — Step by Step", e: "The exact wrapping technique for the izar and rida, plus a video-style breakdown you can practice at home.", r: "8 min read" },
-          { t: "Ihram Rules for Women: A Simple Guide", e: "There is no special Ihram dress for women — here is what qualifies as proper Ihram clothing for sisters.", r: "5 min read" },
-          { t: "9 Common Ihram Mistakes and How to Avoid Them", e: "Covering the face, using perfume, stitching violations — the prohibitions of Ihram explained with their expiations.", r: "7 min read" },
+        slug: "umrah-proof",
+        name: "Proof & Certification",
+        icon: "🏅",
+        about: "How completion is documented and delivered to the sponsor.",
+        articles: [
+          { title: "Milestone tracking", text: "Each stage is updated through the order tracking page so the sponsor can follow the process in real time with the tracking code received after checkout." },
+          { title: "Photo and video proof", text: "Where a milestone requires proof, clear photographs and videos are uploaded for sponsor review." },
+          { title: "Location verification", text: "Captured location and timing may be attached to proof while the performer completes the ritual." },
+          { title: "Completion certificate", text: "After all milestones are complete, a certificate is generated and made available through the order." },
         ],
       },
       {
-        slug: "mental-spiritual-preparation", name: "Mental & Spiritual Preparation", icon: "🤲", articles: 2, views: "5.5K", comments: 4,
-        about: "A pilgrimage is a journey of the heart — prepare your mind and soul before your body travels.",
-        list: [
-          { t: "Preparing Your Heart Before You Travel", e: "Practical steps to shift from a tourist mindset to a pilgrim mindset — forgiving debts, settling disputes and making intentions.", r: "6 min read" },
-          { t: "Learn the Talbiyah with Meaning", e: "The complete Talbiyah with word-by-word translation so you can recite it with understanding and presence of heart.", r: "4 min read" },
-        ],
-      },
-    ],
-  },
-  {
-    slug: "travel",
-    name: "Travel",
-    icon: "✈️",
-    articles: 8,
-    gradient: "linear-gradient(135deg,#0369a1 0%,#0c4a6e 100%)",
-    tint: "#e5f2fa",
-    chip: "#0369a1",
-    desc: "Flights, visas, trains and getting around — everything about the journey to the Holy Cities of Makkah and Madinah.",
-    subcategories: [
-      {
-        slug: "flights-airports", name: "Flights & Airports", icon: "🛫", articles: 3, views: "5.4K", comments: 8,
-        about: "Airlines, routes, fares by season and navigating Jeddah & Madinah airports on arrival.",
-        list: [
-          { t: "Direct Flights to Jeddah & Madinah from Pakistan", e: "Airlines, average fares by season, and the smartest day of the week to book for cheaper Umrah travel.", r: "6 min read" },
-          { t: "Navigating Jeddah Airport on Arrival", e: "Immigration, SIM cards, currency exchange and transport options — exactly what to do after landing.", r: "5 min read" },
-          { t: "Which Airport Should You Land At?", e: "Jeddah vs Madinah airport — how your arrival city changes your itinerary and saves you travel time.", r: "4 min read" },
-        ],
-      },
-      {
-        slug: "visa-documentation", name: "Visa & Documentation", icon: "🛂", articles: 2, views: "4.9K", comments: 6,
-        about: "Umrah visas, visit visas and the new Nusuk platform — which visa type fits your trip.",
-        list: [
-          { t: "Umrah Visa vs Saudi Visit Visa — What Changed", e: "The new Nusuk platform, e-visa options for eligible countries, and which visa type fits your trip.", r: "7 min read" },
-          { t: "Step-by-Step Umrah Visa Application Guide", e: "Documents required, processing time, fees and common reasons for visa rejection.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "transportation", name: "Transportation", icon: "🚄", articles: 2, views: "5.1K", comments: 5,
-        about: "The Haramain train, buses, taxis and ride apps — moving between and inside the Holy Cities.",
-        list: [
-          { t: "Haramain High-Speed Railway: Complete Guide", e: "Booking tickets online, luggage rules, and how the 35-minute Makkah–Madinah train changes your itinerary.", r: "6 min read" },
-          { t: "Getting Around Makkah & Madinah", e: "Buses, taxis and ride apps — realistic costs and the easiest ways to move between hotel and Haram.", r: "5 min read" },
-        ],
-      },
-      {
-        slug: "luggage-packing-tips", name: "Luggage & Packing Tips", icon: "🎒", articles: 1, views: "4.6K", comments: 3,
-        about: "Pack light, pack smart — the luggage strategies experienced pilgrims actually use.",
-        list: [
-          { t: "Smart Packing for a 10-Day Umrah Trip", e: "Carry-on essentials, Zamzam allowance rules, and the one-bag strategy experienced pilgrims swear by.", r: "6 min read" },
+        slug: "makkah-travel",
+        name: "Makkah & Travel",
+        icon: "🕌",
+        about: "The Haram sanctuary, repeat Umrah and how crowds affect the schedule.",
+        articles: [
+          { title: "Makkah: The Haram", text: "The Haram is a sanctified area where rewards are amplified and special rules apply out of reverence for God. It was declared a sanctuary from the day the heavens and earth were created, and it remains so till the end of time." },
+          { title: "Repeat Umrah for Badal", text: "One Umrah serves as atonement for the sins committed between it and the previous one, and performing it more than once is permitted. For a second Umrah, the performer enters Ihram again from the nearest Miqat — such as Aishah's mosque in Al Taneem — and repeats the sequence for the beneficiary." },
+          { title: "Best time & crowd planning", text: "It is better to perform the rituals in less crowded times so Tawaf and prayers are completed with ease. Umrah is not arranged during the Hajj season for those not combining it with Hajj, so that the sacred sites remain available for Hajj pilgrims." },
         ],
       },
     ],
   },
   {
-    slug: "umrah",
-    name: "Umrah",
-    icon: "🌙",
-    articles: 26,
-    gradient: "linear-gradient(135deg,#6d28d9 0%,#4c1d95 100%)",
-    tint: "#f1eafd",
-    chip: "#6d28d9",
-    desc: "Complete Umrah guidance — step-by-step rituals, authentic duas, beginners' guides and the mistakes to avoid.",
-    subcategories: [
-      {
-        slug: "umrah-rituals", name: "Umrah Rituals", icon: "🕋", articles: 8, views: "9.2K", comments: 21,
-        about: "Ihram, Tawaf, Sa'i and Halq — every ritual of Umrah explained in correct order.",
-        list: [
-          { t: "Umrah Step by Step: The Complete Guide", e: "From Ihram at the Miqat to Halq — every stage of Umrah in order, with duas for each step.", r: "12 min read" },
-          { t: "How to Perform Tawaf Correctly", e: "Starting point, direction, Raml, and what to do if you lose count during your circuits.", r: "8 min read" },
-          { t: "Sa'i Between Safa and Marwah Explained", e: "The history, the green light markers, and the correct dua for each round.", r: "7 min read" },
-        ],
-      },
-      {
-        slug: "umrah-duas-prayers", name: "Umrah Duas & Prayers", icon: "🤲", articles: 6, views: "8.1K", comments: 17,
-        about: "Authentic duas for the Miqat, Tawaf, Multazam, Maqam Ibrahim and every moment in between.",
-        list: [
-          { t: "Duas for Every Step of Umrah", e: "Authentic duas at the Miqat, during Tawaf, between the corners, at Multazam and after Sa'i.", r: "9 min read" },
-          { t: "Duas at Multazam & Maqam Ibrahim", e: "The spots most beloved for supplication inside the Haram and the etiquette of praying there.", r: "5 min read" },
-        ],
-      },
-      {
-        slug: "umrah-for-beginners", name: "Umrah for Beginners", icon: "🌱", articles: 5, views: "7.6K", comments: 12,
-        about: "First time going for Umrah? Start here — costs, timing and exactly what to expect.",
-        list: [
-          { t: "First Time Umrah: Complete Beginner Guide", e: "Everything first-timers need — costs, timing, what to expect inside the Haram and how to stay calm.", r: "10 min read" },
-          { t: "Umrah Checklist for First-Timers", e: "Printable checklist covering documents, apps, medicines, money and spiritual prep.", r: "5 min read" },
-        ],
-      },
-      {
-        slug: "common-mistakes-umrah", name: "Common Mistakes in Umrah", icon: "⚠️", articles: 4, views: "6.9K", comments: 9,
-        about: "Errors that can affect your Umrah — and the correct way the scholars explain.",
-        list: [
-          { t: "10 Mistakes Pilgrims Make During Umrah", e: "From rushing Tawaf to skipping Niyyah — avoid these errors that can affect your Umrah.", r: "8 min read" },
-        ],
-      },
-      {
-        slug: "umrah-with-family", name: "Umrah with Family", icon: "👨‍👩‍👧", articles: 3, views: "5.8K", comments: 7,
-        about: "Performing Umrah with children and elderly parents — pacing, logistics and practical tips.",
-        list: [
-          { t: "Performing Umrah with Children: Practical Tips", e: "Stroller rules, lost-child plans, and the best prayer times for families with kids.", r: "6 min read" },
-          { t: "Umrah Guide for Elderly Parents", e: "Wheelchair services, accessible Tawaf floors and pacing rituals for older pilgrims.", r: "7 min read" },
-        ],
-      },
-    ],
-  },
-  {
-    slug: "hajj",
-    name: "Hajj",
-    icon: "🐪",
-    articles: 46,
-    gradient: "linear-gradient(135deg,#b45309 0%,#78350f 100%)",
+    slug: "hajj-badal",
+    name: "Hajj Badal",
+    symbol: "𓂀",
+    color: "#b45309",
     tint: "#fdf1e2",
-    chip: "#b45309",
-    desc: "The journey of a lifetime — day-by-day Hajj rituals, the Day of Arafah, Jamarat and step-by-step guides.",
-    subcategories: [
+    eyebrow: "Hajj Guide",
+    heroLine: "Fulfil the duty of Hajj on behalf of a loved one",
+    desc: "A complete guide to eligibility, representation, rituals, Hady and Udhiya.",
+    overview:
+      "Hajj Badal is the performance of obligatory Hajj on behalf of another person. It is permitted for eligible deceased people or those permanently unable to perform Hajj. The representative must follow the beneficiary's intended type of Hajj and must not leave obligatory rites incomplete.",
+    sections: [
       {
-        slug: "hajj-rituals", name: "Hajj Rituals", icon: "🕋", articles: 12, views: "11.2K", comments: 28,
-        about: "Ihram, Tashreeq, Jamarat and farewell Tawaf — the complete ritual sequence of Hajj.",
-        list: [
-          { t: "Hajj Rituals Day by Day Explained", e: "From 8th Dhul Hijjah to the farewell Tawaf — the complete Hajj sequence with the logic behind each ritual.", r: "15 min read" },
-          { t: "Stoning the Jamarat: Complete Guide", e: "Timings, the pebble counting rules, and how to stay safe in the crowds at the Jamaraat bridge.", r: "8 min read" },
+        slug: "hajj-overview",
+        name: "What is Hajj Badal?",
+        icon: "🕋",
+        about: "The meaning, ruling and circumstances in which Hajj Badal may be arranged.",
+        articles: [
+          { title: "Definition", text: "Hajj Badal, also called Proxy Hajj or Hajj e Badal, means appointing another person to perform compulsory Hajj on someone else's behalf." },
+          { title: "Permissibility", text: "The permissibility is established in Islamic teaching and supported across the major schools. The representative must complete their own obligatory Hajj first unless a qualified scholar confirms an exception." },
+          { title: "When is it used?", text: "It may be used for a person who has passed away, has reached an age that prevents travel, or suffers from permanent illness with no hope of recovery." },
+          { title: "How many times?", text: "Guidance varies by case and madhab. Umrah Badal may be performed more than once; an individual case should be confirmed with a qualified scholar." },
         ],
       },
       {
-        slug: "hajj-step-by-step", name: "Hajj Step-by-Step", icon: "🗓️", articles: 9, views: "10.1K", comments: 24,
-        about: "A dated, day-by-day timeline of Hajj so you always know exactly what comes next.",
-        list: [
-          { t: "Hajj 2026: Step-by-Step Timeline", e: "A dated timeline of every Hajj day with checklists so you always know what comes next.", r: "12 min read" },
-          { t: "8th Dhul Hijjah: The Day of Tarwiyah", e: "What pilgrims do on the first official day of Hajj and the sunnahs of this day.", r: "6 min read" },
+        slug: "hajj-eligibility",
+        name: "Eligibility & Conditions",
+        icon: "✅",
+        about: "The representative, intention, authority and Hajj type.",
+        articles: [
+          { title: "Step 1 — Confirm eligibility", text: "The person represented must qualify because of death, permanent inability or another case recognized by a qualified scholar." },
+          { title: "Step 2 — The representative", text: "The appointed person must be sane, Muslim, physically able and qualified to perform every required rite." },
+          { title: "Step 3 — Make Niyyah at Ihram", text: "At the time of entering Ihram, the representative makes the Niyyah on behalf of the named person." },
+          { title: "Step 4 — Confirm authority", text: "The representative must be authorized by or on behalf of the intended person. Complex authorization should be documented." },
+          { title: "Step 5 — Follow the requested Hajj type", text: "Ifraad, Tamattu or Qiran should be completed according to the valid desire or ruling of the person represented." },
+          { title: "Step 6 — Complete every obligation", text: "No obligatory Hajj rite may be deliberately omitted. Any violation or missed duty should receive the applicable ruling." },
         ],
       },
       {
-        slug: "tawaf-and-sai", name: "Tawaf & Sa'i", icon: "🔄", articles: 7, views: "8.7K", comments: 18,
-        about: "The rulings of Tawaf and Sa'i in Hajj — and how they differ from Umrah.",
-        list: [
-          { t: "Tawaf al-Ifadah Explained", e: "The obligatory Tawaf of Hajj, its timing window and the rulings people most often confuse.", r: "7 min read" },
-          { t: "Sa'i in Hajj vs Umrah — Key Differences", e: "Intention, clothing and timing differences between the two Sa'i explained simply.", r: "5 min read" },
+        slug: "hajj-qurbani",
+        name: "Hady, Qurbani & Udhiya",
+        icon: "🐐",
+        about: "The difference between required Hady, Hajj expiation and voluntary Udhiya.",
+        articles: [
+          { title: "Does one sacrifice cover both people?", text: "A separate sacrifice does not become necessary merely because Hajj is performed for another person. Hady or Dam may be required for Tamattu or Qiran Hajj or an applicable violation." },
+          { title: "What is Hady?", text: "Hady is a required sacrificial offering connected to a specific Hajj ruling or expiation." },
+          { title: "What is Udhiya?", text: "Udhiya is the voluntary Eid al-Adha sacrifice. It is not automatically the same as Hady required in Hajj." },
+          { title: "Who pays for it?", text: "The cost and package inclusion should be clearly stated. Any required sacrifice should be documented and confirmed in the order." },
         ],
       },
       {
-        slug: "hajj-for-beginners", name: "Hajj for Beginners", icon: "🌱", articles: 7, views: "7.9K", comments: 11,
-        about: "An honest preview of your first Hajj — crowds, heat, emotions and how to prepare.",
-        list: [
-          { t: "First Hajj: What to Expect — A Reality Check", e: "Crowds, heat, sleep and emotions — an honest preview so you arrive mentally ready.", r: "9 min read" },
-        ],
-      },
-      {
-        slug: "day-of-arafah", name: "Day of Arafah", icon: "⛰️", articles: 6, views: "9.4K", comments: 15,
-        about: "The greatest day of Hajj — standing at Arafah, its duas and its virtues.",
-        list: [
-          { t: "The Day of Arafah: What Pilgrims Do", e: "The greatest day of Hajj — standing at Arafah, the khutbah, and combined prayers explained.", r: "8 min read" },
-          { t: "Best Duas to Recite on the Day of Arafah", e: "The recommended adhkar and the famous dua the Prophet ﷺ recited on this day.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "common-mistakes-hajj", name: "Common Mistakes in Hajj", icon: "⚠️", articles: 5, views: "6.8K", comments: 10,
-        about: "Violations, missed rituals and the fidyah (expiation) rules that apply to each.",
-        list: [
-          { t: "Common Hajj Mistakes and Their Expiation", e: "Violations of Ihram, missed rituals and the fidyah rules that apply to each one.", r: "9 min read" },
-        ],
-      },
-    ],
-  },
-  {
-    slug: "makkah",
-    name: "Makkah",
-    icon: "🕋",
-    articles: 82,
-    gradient: "linear-gradient(135deg,#374151 0%,#111827 100%)",
-    tint: "#f3f4f6",
-    chip: "#374151",
-    desc: "Masjid al-Haram, Tawaf, Zamzam and the sacred sites around the Holy City of Makkah.",
-    subcategories: [
-      {
-        slug: "historical-places-makkah", name: "Historical Places in Makkah", icon: "🏛️", articles: 18, views: "10.6K", comments: 26,
-        about: "Cave Hira, Cave Thawr, Mina, Arafah and the blessed mountains that witnessed revelation.",
-        list: [
-          { t: "Jabal al-Noor & Cave Hira: Visitor Guide", e: "The story of the first revelation and what to expect if you climb the mountain of light.", r: "8 min read" },
-          { t: "Mina, Arafah & Muzdalifah: Ziyarat Guide", e: "Visit the sacred sites outside Hajj season — what you can see and how to get there.", r: "7 min read" },
-          { t: "Cave Thawr: The Story of the Hijrah", e: "Where the Prophet ﷺ hid during migration — history and hiking tips.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "masjid-al-haram", name: "Masjid al-Haram", icon: "🕌", articles: 15, views: "12.4K", comments: 32,
-        about: "Gates, floors, women's areas and the complete layout of the largest mosque in the world.",
-        list: [
-          { t: "Complete Guide to Masjid al-Haram", e: "Gates, floors, shuttle routes and the layout of the largest mosque in the world.", r: "12 min read" },
-          { t: "Women's Prayer Areas in Masjid al-Haram", e: "Best spots, timings and practical tips for sisters visiting the Haram.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "hotels-stay-makkah", name: "Hotels & Stay in Makkah", icon: "🏨", articles: 11, views: "6.4K", comments: 12,
-        about: "Where to stay near the Haram — areas, price ranges and hotel reviews by pilgrims.",
-        list: [
-          { t: "Best Areas to Stay Near the Haram", e: "Ajyad, Misfalah, Aziziyah — comparing walking distance, price and comfort.", r: "7 min read" },
-        ],
-      },
-      {
-        slug: "tawaf-guide", name: "Tawaf Guide", icon: "🔄", articles: 9, views: "9.8K", comments: 22,
-        about: "Master Tawaf — gates, upper floors, peak timings and etiquette inside the Mataf.",
-        list: [
-          { t: "Which Gate of Haram Is Best for Tawaf?", e: "Strategic gates and entry tips to start your Tawaf without the worst crowds.", r: "5 min read" },
-          { t: "Tawaf on Upper Floors & Roof: Pros and Cons", e: "When the Mataf is too crowded, the upper floors offer a peaceful alternative.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "food-shopping-makkah", name: "Food & Shopping in Makkah", icon: "🍽️", articles: 8, views: "5.9K", comments: 9,
-        about: "Budget eats near the Haram, date markets, perfumes and the best shopping streets.",
-        list: [
-          { t: "Best Budget Food Near Masjid al-Haram", e: "From Pakistani restaurants to Saudi classics — filling meals under 15 SAR.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "zamzam-water", name: "Zamzam Water", icon: "💧", articles: 6, views: "7.2K", comments: 14,
-        about: "The history, virtues and practical rules of the blessed water of Zamzam.",
-        list: [
-          { t: "The History & Virtues of Zamzam Water", e: "The story of Hajar and Ismail, and why this water is unlike any other.", r: "6 min read" },
-          { t: "How to Take Zamzam Home Legally", e: "Airport rules, 5-litre sealed bottles and the right way to pack Zamzam.", r: "4 min read" },
-        ],
-      },
-      {
-        slug: "makkah-ziyarat-tours", name: "Makkah Ziyarat & Tours", icon: "🚌", articles: 10, views: "7.1K", comments: 13,
-        about: "One-day Ziyarat routes, private transport costs and DIY touring tips in Makkah.",
-        list: [
-          { t: "Makkah Ziyarat List: Complete Route", e: "All the major sites in one day's route with approximate costs of private transport.", r: "8 min read" },
-        ],
-      },
-      {
-        slug: "jeddah-airport-to-makkah", name: "Jeddah Airport to Makkah", icon: "🚕", articles: 5, views: "5.1K", comments: 8,
-        about: "Train, taxi or bus — every transport option from Jeddah airport to the Haram.",
-        list: [
-          { t: "Jeddah Airport to Makkah: All Transport Options", e: "Train, taxi, bus — speeds, costs and which option suits families best.", r: "6 min read" },
+        slug: "hajj-evidence",
+        name: "Quran & Sunnah",
+        icon: "📖",
+        about: "The scriptural and hadith basis commonly presented for Hajj Badal.",
+        articles: [
+          { title: "Surah Ali Imran 3:97", text: "Allah says that Hajj to the House is a duty owed to Allah by mankind, for those who can find a way to do it." },
+          { title: "Sahih al-Bukhari 1754", text: "A woman asked whether she could perform Hajj on behalf of her deceased mother. The Prophet (peace be upon him) confirmed that she should, comparing it to paying a debt owed to Allah." },
+          { title: "Abu Dawood 1811", text: "A man declared Hajj on behalf of Shubrumah before completing his own Hajj. The Prophet (peace be upon him) instructed him to complete Hajj for himself first, then perform Hajj for his relative." },
         ],
       },
     ],
   },
   {
-    slug: "madinah",
-    name: "Madinah",
-    icon: "🕌",
-    articles: 83,
-    gradient: "linear-gradient(135deg,#15803d 0%,#14532d 100%)",
-    tint: "#e8f6ee",
-    chip: "#15803d",
-    desc: "Masjid an-Nabawi, Riyadul Jannah, historical sites and the peaceful city of the Prophet ﷺ.",
-    subcategories: [
+    slug: "donations",
+    name: "Donations",
+    symbol: "♡",
+    color: "#0369a1",
+    tint: "#e5f2fa",
+    eyebrow: "Sadaqah Guide",
+    heroLine: "Give with clarity, receive proof of impact",
+    desc: "A clear guide to Iftar, Zamzam, Quran, orphan and Eid donations.",
+    overview:
+      "IbadahConnect donations are arranged with a clear intention, package quantity and proof. Each category has a documented process so sponsors can review what was purchased or handed over.",
+    sections: [
       {
-        slug: "historical-places-madinah", name: "Historical Places in Madinah", icon: "🏛️", articles: 20, views: "11.1K", comments: 28,
-        about: "Quba, Uhud, Jannat al-Baqi and the blessed landmarks of the Prophet's city.",
-        list: [
-          { t: "Quba Mosque: Virtues & Visit Guide", e: "The first mosque in Islam and the sunnah of entering Madinah through it.", r: "6 min read" },
-          { t: "Uhud Mountain: The Story & Ziyarat", e: "The battle, the martyrs and how to visit Uhud respectfully.", r: "7 min read" },
-          { t: "Jannat al-Baqi: History & Visiting Rules", e: "The graveyard that holds the family of the Prophet ﷺ — timings and etiquette.", r: "6 min read" },
+        slug: "donation-types",
+        name: "Donation Types",
+        icon: "🎁",
+        about: "Choose an appropriate Iftar, Zamzam, orphan, Eid or Quran donation.",
+        articles: [
+          { title: "Iftar and meals", text: "Arrange a meal or Iftar for eligible fasting people. The package should clearly state quantity and location." },
+          { title: "Zamzam and water", text: "Confirm approved quantity, delivery method and recipient conditions before placing the order." },
+          { title: "Orphan and family support", text: "Provide essentials or an Eid gift through a documented handover to a verified family or beneficiary." },
+          { title: "Quran donation", text: "Donate Quran copies or Islamic learning essentials to a suitable recipient or institution." },
+          { title: "Sadaqah Jariyah", text: "Lasting assistance such as food security, wheelchairs or education support is arranged with an outcome and handover record." },
         ],
       },
       {
-        slug: "masjid-an-nabawi", name: "Masjid an-Nabawi", icon: "🕌", articles: 16, views: "12.8K", comments: 35,
-        about: "Gates, the Green Dome, courtyards and prayer inside the Prophet's Mosque ﷺ.",
-        list: [
-          { t: "Complete Guide to Masjid an-Nabawi", e: "Gates, the Green Dome, expanding courtyards and prayer inside the Prophet's Mosque.", r: "12 min read" },
-          { t: "Best Times to Visit Masjid an-Nabawi", e: "Between peak seasons, after Fajr, or late night — finding calm in the Prophet's city.", r: "5 min read" },
-        ],
-      },
-      {
-        slug: "riyadul-jannah", name: "Riyadul Jannah", icon: "🌿", articles: 8, views: "9.6K", comments: 21,
-        about: "The garden between the Prophet's ﷺ house and minbar — its virtues and how to enter it.",
-        list: [
-          { t: "Riyadul Jannah: Garden of Paradise Guide", e: "The area between the Prophet's ﷺ house and minbar — its virtues and how to identify it.", r: "7 min read" },
-        ],
-      },
-      {
-        slug: "rawdah-booking-guide", name: "Rawdah Booking Guide", icon: "🎫", articles: 7, views: "8.9K", comments: 19,
-        about: "Step-by-step Nusuk permits for Rawdah and Riyadul Jannah — timings, QR codes and tips.",
-        list: [
-          { t: "Step-by-Step Rawdah Permit via Nusuk App", e: "Book your free slot, QR code rules and what happens if you miss your window.", r: "8 min read" },
-          { t: "Rawdah Visit for Women: Updated Timings", e: "The dedicated hours for sisters and how the permit system works for them.", r: "5 min read" },
-        ],
-      },
-      {
-        slug: "hotels-stay-madinah", name: "Hotels & Stay in Madinah", icon: "🏨", articles: 12, views: "6.8K", comments: 13,
-        about: "Hotels near Masjid an-Nabawi — walking distances, prices and pilgrim reviews.",
-        list: [
-          { t: "Hotels Walking Distance to Masjid an-Nabawi", e: "The central area hotels worth every rupee for easy prayer access.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "food-shopping-madinah", name: "Food & Shopping in Madinah", icon: "🍽️", articles: 9, views: "6.1K", comments: 10,
-        about: "Dates markets, souvenirs and the best food streets around the Prophet's Mosque.",
-        list: [
-          { t: "Dates Market Guide: Ajwa & Beyond", e: "Where to buy authentic Ajwa, fair prices per kilo, and other Madinah specialties.", r: "6 min read" },
-        ],
-      },
-      {
-        slug: "ziyarat-tours", name: "Ziyarat Tours", icon: "🚌", articles: 11, views: "7.4K", comments: 15,
-        about: "Complete Ziyarat routes of Madinah — guided tours vs exploring on your own.",
-        list: [
-          { t: "Complete Madinah Ziyarat List", e: "Every major site with history, transport tips and a one-day DIY route.", r: "9 min read" },
-          { t: "DIY Ziyarat vs Guided Tour: Which Is Better?", e: "Costs, flexibility and what a guide actually adds to your Madinah trip.", r: "5 min read" },
+        slug: "donation-process",
+        name: "Booking & Handover",
+        icon: "📋",
+        about: "The complete process from intention to receipt and final proof.",
+        articles: [
+          { title: "Step 1 — Select a donation", text: "Choose the category and package that matches the donation and budget." },
+          { title: "Step 2 — Share the intention", text: "Add the beneficiary name or Niyyah if the donation is being made on behalf of someone." },
+          { title: "Step 3 — Make payment", text: "Complete the booking with an approved payment method and retain the confirmation." },
+          { title: "Step 4 — Review handover proof", text: "View receipts, photos or handover records and keep the completion update." },
         ],
       },
     ],
   },
 ];
 
-const TOTAL_ARTICLES = GUIDE_DATA.reduce((s, c) => s + c.articles, 0);
-
-/* ============================== STYLES ================================== */
-
-const GuideStyles = () => (
-  <style>{`
-    .gc-wrap{min-height:100vh;background:#f4f8f6;padding-bottom:90px}
-    .gc-hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#0a4d32 0%,#0d6b44 55%,#12855a 100%);color:#fff;padding:62px 24px 88px;text-align:center}
-    .gc-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 15% 25%,rgba(255,255,255,.09) 0,transparent 42%),radial-gradient(circle at 85% 75%,rgba(255,255,255,.07) 0,transparent 42%)}
-    .gc-hero.small{padding:44px 24px 78px}
-    .gc-hero-emoji{font-size:52px;line-height:1;margin-bottom:14px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.25))}
-    .gc-eyebrow{display:inline-block;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.28);color:#ffe9a8;padding:6px 16px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:2.5px;text-transform:uppercase;margin-bottom:16px}
-    .gc-title{font-size:40px;font-weight:800;margin:0 0 12px;letter-spacing:-.5px}
-    .gc-subtitle{max-width:660px;margin:0 auto;font-size:15.5px;line-height:1.75;color:rgba(255,255,255,.88)}
-    .gc-hero-stats{display:flex;gap:10px;justify-content:center;margin-top:26px;flex-wrap:wrap}
-    .gc-stat-chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.24);padding:8px 18px;border-radius:999px;font-size:13px;font-weight:700}
-    .gc-body{max-width:1120px;margin:-50px auto 0;padding:0 20px;position:relative;z-index:2}
-    .gc-search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #dbe7e1;border-radius:16px;padding:14px 18px;box-shadow:0 14px 34px rgba(10,77,50,.12);margin-bottom:34px}
-    .gc-search-icon{font-size:16px;opacity:.7}
-    .gc-search input{flex:1;border:0;outline:0;font-size:15px;background:transparent;color:#14342a}
-    .gc-search input::placeholder{color:#9db3a8}
-    .gc-sec-head{margin:0 0 18px}
-    .gc-sec-title{font-size:22px;font-weight:800;color:#123528;margin:0 0 6px}
-    .gc-sec-sub{font-size:14px;color:#5b7268;margin:0}
-    .gc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:22px}
-    .gc-cat-card{background:#fff;border:1px solid #e3ede8;border-radius:20px;overflow:hidden;cursor:pointer;transition:all .25s ease;box-shadow:0 4px 14px rgba(10,77,50,.06);display:flex;flex-direction:column}
-    .gc-cat-card:hover{transform:translateY(-5px);box-shadow:0 18px 38px rgba(10,77,50,.16)}
-    .gc-cat-top{height:96px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;color:#fff;flex-shrink:0}
-    .gc-cat-ico{width:56px;height:56px;border-radius:16px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.32);display:flex;align-items:center;justify-content:center;font-size:28px}
-    .gc-cat-count{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);padding:5px 12px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
-    .gc-cat-body{padding:18px 22px 20px;display:flex;flex-direction:column;flex:1}
-    .gc-cat-name{font-size:18px;font-weight:800;color:#123528;margin:0 0 8px}
-    .gc-cat-desc{font-size:13.5px;line-height:1.65;color:#5b7268;margin:0 0 16px;flex:1}
-    .gc-cat-foot{display:flex;align-items:center;justify-content:space-between}
-    .gc-cat-view{font-size:13px;font-weight:750;color:#0d6b44}
-    .gc-arrow{width:34px;height:34px;border-radius:50%;background:#e7f5ee;color:#0d6b44;display:flex;align-items:center;justify-content:center;font-weight:800;transition:all .25s ease}
-    .gc-cat-card:hover .gc-arrow{background:#0d6b44;color:#fff;transform:translateX(4px)}
-    .gc-sub-card{background:#fff;border:1px solid #e3ede8;border-radius:18px;padding:20px;cursor:pointer;transition:all .22s ease;display:flex;flex-direction:column;gap:14px;box-shadow:0 3px 10px rgba(10,77,50,.05)}
-    .gc-sub-card:hover{transform:translateY(-4px);border-color:#bcd9cb;box-shadow:0 14px 30px rgba(10,77,50,.13)}
-    .gc-sub-head{display:flex;align-items:center;gap:13px}
-    .gc-sub-ico{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:23px;flex-shrink:0}
-    .gc-sub-name{font-size:15.5px;font-weight:750;color:#123528;margin:0;line-height:1.35}
-    .gc-sub-about{font-size:13px;line-height:1.6;color:#6b8177;margin:0;flex:1}
-    .gc-sub-meta{display:flex;gap:8px;flex-wrap:wrap}
-    .gc-pill{font-size:11.5px;font-weight:750;padding:5px 11px;border-radius:999px;background:#f0f6f3;color:#41594f;border:1px solid #e0ebe5;white-space:nowrap}
-    .gc-pill.green{background:#e7f5ee;border-color:#cfe8db;color:#0d6b44}
-    .gc-pill.gold{background:#fdf6e3;border-color:#f0e3bb;color:#8a6d1a}
-    .gc-pill.red{background:#fdeeee;border-color:#f3d4d4;color:#a34444}
-    .gc-crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:24px;color:#6b8177}
-    .gc-crumb{cursor:pointer;color:#0d6b44;font-weight:700;background:none;border:0;padding:0;font-size:13px}
-    .gc-crumb:hover{text-decoration:underline}
-    .gc-crumb.current{color:#8fa39a;font-weight:500;cursor:default}
-    .gc-sep{color:#c3d4cc}
-    .gc-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:34px}
-    .gc-stat-box{background:#fff;border:1px solid #e3ede8;border-radius:16px;padding:18px 20px;text-align:center;box-shadow:0 3px 10px rgba(10,77,50,.05)}
-    .gc-stat-num{font-size:26px;font-weight:800;color:#0d6b44;margin:0 0 4px}
-    .gc-stat-label{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8fa39a;margin:0}
-    .gc-art-list{display:flex;flex-direction:column;gap:12px}
-    .gc-art-card{background:#fff;border:1px solid #e3ede8;border-radius:16px;padding:18px 20px;cursor:pointer;transition:all .2s ease;box-shadow:0 2px 8px rgba(10,77,50,.05)}
-    .gc-art-card:hover{border-color:#bcd9cb}
-    .gc-art-top{display:flex;align-items:flex-start;gap:14px;justify-content:space-between}
-    .gc-art-title{font-size:15.5px;font-weight:750;color:#123528;margin:0 0 6px;line-height:1.45}
-    .gc-art-meta{display:flex;gap:14px;font-size:12px;color:#7a8f85;flex-wrap:wrap}
-    .gc-art-chevron{color:#9db3a8;font-size:15px;transition:transform .25s ease;flex-shrink:0;margin-top:3px}
-    .gc-art-card.open .gc-art-chevron{transform:rotate(180deg)}
-    .gc-art-excerpt{max-height:0;overflow:hidden;transition:all .3s ease;font-size:13.5px;line-height:1.75;color:#5b7268}
-    .gc-art-card.open .gc-art-excerpt{max-height:260px;margin-top:12px;padding-top:12px;border-top:1px dashed #e0ebe5}
-    .gc-more-row{margin-top:16px;text-align:center;font-size:13px;font-weight:700;color:#0d6b44;background:#e7f5ee;border:1px dashed #bcd9cb;border-radius:12px;padding:13px}
-    .gc-empty{background:#fff;border:1px dashed #d4e2da;border-radius:18px;padding:56px 24px;text-align:center}
-    .gc-empty-emoji{font-size:44px;margin-bottom:12px}
-    .gc-empty-title{font-size:17px;font-weight:800;color:#123528;margin:0 0 8px}
-    .gc-empty-sub{font-size:13.5px;color:#7a8f85;margin:0 0 20px}
-    .gc-back-btn{display:inline-block;background:#0d6b44;color:#fff;border:0;border-radius:12px;padding:11px 22px;font-size:13.5px;font-weight:750;cursor:pointer}
-    .gc-back-btn:hover{background:#0a5536}
-    .gc-back-btn.ghost{background:#fff;color:#0d6b44;border:1.5px solid #bcd9cb}
-    .gc-notfound{max-width:520px;margin:60px auto;background:#fff;border:1px solid #e3ede8;border-radius:22px;padding:52px 32px;text-align:center;box-shadow:0 8px 26px rgba(10,77,50,.08)}
-    .gc-btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-    .gc-note{margin-top:26px;background:#fffdf4;border:1px solid #f0e3bb;border-radius:14px;padding:14px 18px;font-size:12.5px;line-height:1.65;color:#8a6d1a}
-    @media(max-width:640px){
-      .gc-title{font-size:29px}
-      .gc-hero{padding:46px 18px 80px}
-      .gc-grid{grid-template-columns:1fr}
-      .gc-stats-row{grid-template-columns:1fr;gap:10px}
-      .gc-body{padding:0 14px}
-    }
-  `}</style>
-);
-
-/* ============================== HELPERS ================================= */
-
-const fmt = (n) => (n === 1 ? "1 Article" : n + " Articles");
-
-function Crumbs({ items }) {
-  const nav = useNavigate();
-  return (
-    <div className="gc-crumbs">
-      {items.map((it, i) =>
-        it.to ? (
-          <React.Fragment key={i}>
-            <button className="gc-crumb" onClick={() => nav(it.to)}>{it.label}</button>
-            <span className="gc-sep">›</span>
-          </React.Fragment>
-        ) : (
-          <span className="gc-crumb current" key={i}>{it.label}</span>
-        )
-      )}
-    </div>
-  );
-}
-
-function SearchBar({ value, onChange, placeholder }) {
-  return (
-    <div className="gc-search">
-      <span className="gc-search-icon">🔍</span>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
-      {value && <button className="gc-crumb" onClick={() => onChange("")}>✕</button>}
-    </div>
-  );
-}
-
-/* ============================== PAGES =================================== */
-
-function GuideHub() {
-  const [q, setQ] = useState("");
-  const nav = useNavigate();
-  const query = q.toLowerCase().trim();
-  const cats = GUIDE_DATA.filter(
-    (c) =>
-      !query ||
-      c.name.toLowerCase().includes(query) ||
-      c.subcategories.some((s) => s.name.toLowerCase().includes(query))
-  );
-  return (
-    <>
-      <div className="gc-hero">
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div className="gc-hero-emoji">🕋</div>
-          <span className="gc-eyebrow">IbadahConnect Knowledge Base</span>
-          <h1 className="gc-title">Hajj &amp; Umrah Guide</h1>
-          <p className="gc-subtitle">
-            Your complete guide to performing Hajj and Umrah — learn the key rituals, requirements,
-            and preparations for the journey of a lifetime.
-          </p>
-          <div className="gc-hero-stats">
-            <span className="gc-stat-chip">📖 {TOTAL_ARTICLES} Articles</span>
-            <span className="gc-stat-chip">🗂️ {GUIDE_DATA.length} Categories</span>
-            <span className="gc-stat-chip">💚 Free Forever</span>
-          </div>
-        </div>
-      </div>
-      <div className="gc-body">
-        <SearchBar value={q} onChange={setQ} placeholder="Search categories & topics… e.g. Ihram, Visa, Tawaf" />
-        <div className="gc-sec-head">
-          <h2 className="gc-sec-title">Browse by Category</h2>
-          <p className="gc-sec-sub">Choose a category to explore its complete list of topics and articles.</p>
-        </div>
-        {cats.length === 0 ? (
-          <div className="gc-empty">
-            <div className="gc-empty-emoji">🔍</div>
-            <h3 className="gc-empty-title">No categories found</h3>
-            <p className="gc-empty-sub">Try a different keyword — like "Ihram", "Visa" or "Tawaf".</p>
-            <button className="gc-back-btn" onClick={() => setQ("")}>Clear Search</button>
-          </div>
-        ) : (
-          <div className="gc-grid">
-            {cats.map((cat) => (
-              <div className="gc-cat-card" key={cat.slug} onClick={() => nav("/guide/" + cat.slug)}>
-                <div className="gc-cat-top" style={{ background: cat.gradient }}>
-                  <div className="gc-cat-ico">{cat.icon}</div>
-                  <span className="gc-cat-count">{fmt(cat.articles)}</span>
-                </div>
-                <div className="gc-cat-body">
-                  <h3 className="gc-cat-name">{cat.name}</h3>
-                  <p className="gc-cat-desc">{cat.desc}</p>
-                  <div className="gc-cat-foot">
-                    <span className="gc-cat-view">Explore Guide</span>
-                    <span className="gc-arrow">→</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function CategoryPage({ cat }) {
-  const [q, setQ] = useState("");
-  const nav = useNavigate();
-  const query = q.toLowerCase().trim();
-  const subs = cat.subcategories.filter((s) => !query || s.name.toLowerCase().includes(query));
-  return (
-    <>
-      <div className="gc-hero small">
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div className="gc-hero-emoji">{cat.icon}</div>
-          <span className="gc-eyebrow">Hajj &amp; Umrah Guide</span>
-          <h1 className="gc-title" style={{ fontSize: 34 }}>{cat.name}</h1>
-          <p className="gc-subtitle">{cat.desc}</p>
-          <div className="gc-hero-stats">
-            <span className="gc-stat-chip">📖 {fmt(cat.articles)}</span>
-            <span className="gc-stat-chip">🗂️ {cat.subcategories.length} Topics</span>
-          </div>
-        </div>
-      </div>
-      <div className="gc-body">
-        <Crumbs
-          items={[
-            { label: "Home", to: "/" },
-            { label: "Guide", to: "/guide" },
-            { label: cat.name },
-          ]}
-        />
-        <SearchBar value={q} onChange={setQ} placeholder={"Search topics in " + cat.name + "…"} />
-        <div className="gc-sec-head">
-          <h2 className="gc-sec-title">Topics in {cat.name}</h2>
-          <p className="gc-sec-sub">Select a topic to read its articles.</p>
-        </div>
-        {subs.length === 0 ? (
-          <div className="gc-empty">
-            <div className="gc-empty-emoji">🔍</div>
-            <h3 className="gc-empty-title">No topics found</h3>
-            <p className="gc-empty-sub">Try a different keyword.</p>
-            <button className="gc-back-btn" onClick={() => setQ("")}>Clear Search</button>
-          </div>
-        ) : (
-          <div className="gc-grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
-            {subs.map((sub) => (
-              <div
-                className="gc-sub-card"
-                key={sub.slug}
-                onClick={() => nav("/guide/" + cat.slug + "/" + sub.slug)}
-              >
-                <div className="gc-sub-head">
-                  <div className="gc-sub-ico" style={{ background: cat.tint }}>{sub.icon}</div>
-                  <h3 className="gc-sub-name">{sub.name}</h3>
-                </div>
-                <p className="gc-sub-about">{sub.about}</p>
-                <div className="gc-sub-meta">
-                  <span className={"gc-pill " + (sub.articles > 0 ? "green" : "red")}>
-                    {sub.articles === 0 ? "Coming Soon" : fmt(sub.articles)}
-                  </span>
-                  <span className="gc-pill">👁️ {sub.views} views</span>
-                  <span className="gc-pill gold">💬 {sub.comments} comments</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function SubCategoryPage({ cat, sub }) {
-  const [openId, setOpenId] = useState(-1);
-  return (
-    <>
-      <div className="gc-hero small">
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div className="gc-hero-emoji">{sub.icon}</div>
-          <span className="gc-eyebrow">{cat.name}</span>
-          <h1 className="gc-title" style={{ fontSize: 32 }}>{sub.name}</h1>
-          <p className="gc-subtitle">{sub.about}</p>
-          <div className="gc-hero-stats">
-            <span className="gc-stat-chip">📖 {fmt(sub.articles)}</span>
-            <span className="gc-stat-chip">👁️ {sub.views} views</span>
-            <span className="gc-stat-chip">💬 {sub.comments} comments</span>
-          </div>
-        </div>
-      </div>
-      <div className="gc-body">
-        <Crumbs
-          items={[
-            { label: "Home", to: "/" },
-            { label: "Guide", to: "/guide" },
-            { label: cat.name, to: "/guide/" + cat.slug },
-            { label: sub.name },
-          ]}
-        />
-        <div className="gc-sec-head">
-          <h2 className="gc-sec-title">Articles</h2>
-          <p className="gc-sec-sub">Click any article to preview it. Full reader view is coming soon.</p>
-        </div>
-        {sub.articles === 0 || !sub.list || sub.list.length === 0 ? (
-          <div className="gc-empty">
-            <div className="gc-empty-emoji">🕌</div>
-            <h3 className="gc-empty-title">Articles coming soon, InshaAllah</h3>
-            <p className="gc-empty-sub">
-              Our team is preparing authentic, well-researched articles for this topic. Meanwhile,
-              explore other topics in {cat.name}.
-            </p>
-            <div className="gc-btn-row">
-              <button className="gc-back-btn" onClick={() => window.history.back()}>← Go Back</button>
-              <button className="gc-back-btn ghost" onClick={() => window.location.assign("/guide/" + cat.slug)}>
-                View {cat.name}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="gc-art-list">
-              {sub.list.map((a, i) => (
-                <div
-                  className={"gc-art-card" + (openId === i ? " open" : "")}
-                  key={i}
-                  onClick={() => setOpenId(openId === i ? -1 : i)}
-                >
-                  <div className="gc-art-top">
-                    <div>
-                      <h3 className="gc-art-title">{a.t}</h3>
-                      <div className="gc-art-meta">
-                        <span>📖 {sub.name}</span>
-                        <span>👁️ {sub.views} views</span>
-                        <span>💬 {sub.comments} comments</span>
-                        <span>⏱️ {a.r}</span>
-                      </div>
-                    </div>
-                    <span className="gc-art-chevron">▼</span>
-                  </div>
-                  <div className="gc-art-excerpt">{a.e}</div>
-                </div>
-              ))}
-            </div>
-            {sub.articles > sub.list.length && (
-              <div className="gc-more-row">
-                + {sub.articles - sub.list.length} more articles coming soon, InshaAllah
-              </div>
-            )}
-            <div className="gc-note">
-              💡 IbadahConnect Guide articles are reviewed for authenticity. For fiqh-related
-              questions specific to your situation, please consult a qualified scholar.
-            </div>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
-function NotFound({ msg }) {
-  const nav = useNavigate();
-  return (
-    <div className="gc-notfound">
-      <div className="gc-empty-emoji">🧭</div>
-      <h2 className="gc-empty-title">{msg || "Page not found"}</h2>
-      <p className="gc-empty-sub">The guide page you are looking for does not exist.</p>
-      <div className="gc-btn-row">
-        <button className="gc-back-btn" onClick={() => nav("/guide")}>← Back to Guide</button>
-        <button className="gc-back-btn ghost" onClick={() => nav("/")}>Go Home</button>
-      </div>
-    </div>
-  );
-}
-
-/* ============================ SMART ROUTER ============================== */
+const styles = `
+html{scroll-behavior:smooth}
+.guide-page{min-height:100vh;padding-top:64px;background:#f4f7f4;color:#183426;font-family:'Outfit','Segoe UI',sans-serif}
+.guide-hero{position:relative;height:min(590px,72vh);min-height:500px;overflow:hidden;color:#fff;background:#10291d}
+.guide-video,.guide-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide-video{animation:guideCinematic 16s ease-in-out infinite alternate}
+.guide-hero-overlay{position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,30,20,.94) 0%,rgba(7,30,20,.72) 44%,rgba(7,30,20,.18) 78%),linear-gradient(0deg,rgba(7,30,20,.58),transparent 55%)}
+.guide-hero-grain{position:absolute;inset:0;opacity:.08;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E")}
+.guide-hero-inner{position:relative;z-index:2;width:min(1180px,calc(100% - 48px));height:100%;margin:auto;display:flex;align-items:center;padding-bottom:58px}
+.guide-hero-copy{max-width:690px;animation:guideReveal .9s cubic-bezier(.2,.7,.2,1) both}
+.guide-breadcrumb{display:flex;align-items:center;gap:9px;margin-bottom:22px;color:rgba(255,255,255,.72);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.guide-breadcrumb a{color:#ead58f;text-decoration:none}
+.guide-kicker{display:inline-flex;align-items:center;gap:10px;color:#ead58f;font-size:11px;font-weight:900;letter-spacing:.22em;text-transform:uppercase}
+.guide-kicker:before{content:"";width:34px;height:1px;background:#ead58f}
+.guide-hero h1{font-family:Amiri,Georgia,serif;font-size:clamp(52px,7vw,82px);line-height:.92;margin:16px 0 18px;text-wrap:balance}
+.guide-hero p{max-width:590px;margin:0;color:rgba(255,255,255,.82);font-size:17px;line-height:1.75}
+.guide-hero-actions{display:flex;gap:12px;margin-top:28px}
+.guide-primary,.guide-secondary{height:48px;display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:0 18px;border-radius:999px;font-size:13px;font-weight:900;text-decoration:none;transition:.25s ease}
+.guide-primary{background:#d0b157;color:#173825;box-shadow:0 12px 30px rgba(208,177,87,.22)}
+.guide-primary:hover{background:#fff;transform:translateY(-3px)}
+.guide-secondary{border:1px solid rgba(255,255,255,.34);background:rgba(255,255,255,.08);color:#fff;backdrop-filter:blur(10px)}
+.guide-secondary:hover{background:rgba(255,255,255,.16);transform:translateY(-3px)}
+.guide-shell{position:relative;z-index:5;width:min(1180px,calc(100% - 48px));margin:-44px auto 0;padding-bottom:96px}
+.guide-picker{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:38px}
+.guide-choice{position:relative;display:grid;grid-template-columns:118px 1fr 38px;align-items:center;min-height:134px;overflow:hidden;padding:8px 12px 8px 8px;border:1px solid rgba(255,255,255,.78);border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 42px rgba(13,49,32,.16);text-align:left;cursor:pointer;transition:.3s cubic-bezier(.2,.7,.2,1)}
+.guide-choice:hover{transform:translateY(-6px);box-shadow:0 24px 48px rgba(13,49,32,.22)}
+.guide-choice.active{border-color:#d0b157;transform:translateY(-4px)}
+.choice-media{position:relative;width:118px;height:118px;border-radius:13px;overflow:hidden}
+.choice-media img{width:100%;height:100%;object-fit:cover;transition:.45s ease}
+.guide-choice:hover .choice-media img{transform:scale(1.07)}
+.choice-media:after{content:"";position:absolute;inset:0;background:linear-gradient(135deg,transparent,rgba(9,44,28,.16))}
+.choice-copy{min-width:0;padding-left:14px}
+.choice-copy small{display:block;color:#9a8a58;font-size:9px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;margin-bottom:6px}
+.choice-copy strong{display:block;color:#173927;font-family:Amiri,Georgia,serif;font-size:23px;line-height:1.05}
+.choice-copy span{display:block;margin-top:7px;color:#738079;font-size:12px;line-height:1.45}
+.choice-arrow{width:38px;height:38px;border:1px solid #dde6df;border-radius:50%;display:grid;place-items:center;color:#1b5135;transition:.25s ease}
+.guide-choice.active .choice-arrow{border-color:#1b5135;background:#1b5135;color:#fff;transform:rotate(45deg)}
+.guide-overview{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:44px;align-items:center;margin:8px 0 54px;padding:42px;background:#fff;border:1px solid #e2e9e4;border-radius:22px;box-shadow:0 12px 36px rgba(20,66,43,.06)}
+.guide-overview-copy small{color:#a18a4c;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase}
+.guide-overview-copy h2{font-family:Amiri,Georgia,serif;font-size:44px;line-height:1.05;margin:9px 0 14px;color:#173927}
+.guide-overview-copy p{max-width:650px;margin:0;color:#66776d;font-size:15px;line-height:1.8}
+.guide-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:28px}
+.guide-metric{padding:14px 10px;border-top:1px solid #e5ebe6;text-align:center}
+.guide-metric strong{display:block;color:#1b5135;font-family:Amiri,Georgia,serif;font-size:24px}
+.guide-metric span{color:#87938d;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.guide-overview-media{height:300px;position:relative;border-radius:16px;overflow:hidden}
+.guide-overview-media img{width:100%;height:100%;object-fit:cover;transition:.7s ease}
+.guide-overview:hover .guide-overview-media img{transform:scale(1.035)}
+.guide-overview-media:after{content:"";position:absolute;inset:0;border:1px solid rgba(255,255,255,.22);border-radius:16px}
+.guide-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:30px;align-items:start}
+.guide-toc{position:sticky;top:82px;border:1px solid #dde6df;border-radius:16px;background:#fff;padding:10px}
+.guide-toc-title{padding:10px 12px 12px;color:#9a8a58;font-size:9px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}
+.guide-toc button{width:100%;display:flex;align-items:center;gap:10px;padding:11px 10px;border:0;border-radius:10px;background:transparent;color:#6d7c74;font-size:12.5px;font-weight:750;text-align:left;cursor:pointer;transition:.22s ease}
+.guide-toc button:hover,.guide-toc button.active{background:#edf4ef;color:#1b5135}
+.toc-number{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#f4f7f4;color:#9a8a58;font-family:Amiri,Georgia,serif;font-size:13px}
+.guide-content{min-width:0}
+.guide-content-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:2px 0 18px}
+.guide-content-head h2{font-family:Amiri,Georgia,serif;font-size:38px;line-height:1;margin:0 0 7px;color:#173927}
+.guide-content-head p{margin:0;color:#7b8981;font-size:13px}
+.guide-search{width:260px;height:46px;display:flex;align-items:center;gap:9px;border:1px solid #dde6df;border-radius:12px;background:#fff;padding:0 13px}
+.guide-search svg{width:17px;height:17px;color:#95a098}
+.guide-search input{width:100%;border:0;outline:0;background:transparent;color:#173927;font:13px 'Outfit',sans-serif}
+.guide-section{scroll-margin-top:180px;margin-bottom:16px;border:1px solid #dde6df;border-radius:16px;background:#fff;overflow:hidden;transition:.3s ease}
+.guide-section:hover{border-color:#cfc9a7;box-shadow:0 12px 30px rgba(20,66,43,.06)}
+.guide-section-button{width:100%;display:grid;grid-template-columns:54px 1fr 38px;align-items:center;gap:14px;padding:16px 18px;border:0;background:#fff;color:inherit;text-align:left;cursor:pointer}
+.guide-section-number{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;border:1px solid #eadfb9;background:#fbf8ed;color:#a18a4c;font-family:Amiri,Georgia,serif;font-size:20px}
+.guide-section-title h3{font-family:Amiri,Georgia,serif;font-size:21px;line-height:1.1;margin:0 0 5px;color:#173927}
+.guide-section-title p{margin:0;color:#7b8981;font-size:12.5px;line-height:1.5}
+.guide-section-toggle{width:38px;height:38px;border:1px solid #dde6df;border-radius:50%;display:grid;place-items:center;color:#1b5135;transition:.25s ease}
+.guide-section.open .guide-section-toggle{transform:rotate(45deg);background:#1b5135;border-color:#1b5135;color:#fff}
+.guide-section-body{max-height:0;overflow:hidden;transition:max-height .45s cubic-bezier(.2,.7,.2,1)}
+.guide-section.open .guide-section-body{max-height:2400px}
+.guide-articles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:0 18px 18px 86px}
+.guide-article{padding:16px;border-radius:12px;background:#f7f9f7;border-left:2px solid #d9c98d}
+.guide-article h4{margin:0 0 7px;color:#173927;font-size:14px}
+.guide-article p{margin:0;color:#6f7d75;font-size:12.5px;line-height:1.75}
+.guide-empty{padding:60px;text-align:center;border:1px solid #dde6df;border-radius:16px;background:#fff;color:#7b8981}
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .75s ease,transform .75s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+@keyframes guideCinematic{from{transform:scale(1.02)}to{transform:scale(1.09)}}
+@keyframes guideReveal{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+@media(max-width:980px){.guide-picker{grid-template-columns:1fr}.guide-choice{grid-template-columns:105px 1fr 38px;min-height:118px}.choice-media{width:105px;height:102px}.guide-layout{grid-template-columns:1fr}.guide-toc{position:relative;top:auto;display:flex;overflow-x:auto}.guide-toc-title{display:none}.guide-toc button{width:auto;white-space:nowrap}.guide-overview{grid-template-columns:1fr}.guide-overview-media{height:260px}}
+@media(max-width:640px){.guide-page{padding-top:64px}.guide-hero{height:540px;min-height:540px}.guide-hero-inner{width:calc(100% - 32px);align-items:flex-end;padding-bottom:58px}.guide-hero h1{font-size:48px}.guide-hero p{font-size:15px}.guide-hero-actions{flex-wrap:wrap}.guide-shell{width:calc(100% - 28px);margin-top:-38px}.guide-picker{gap:8px;margin-bottom:28px}.guide-choice{grid-template-columns:78px 1fr 32px;min-height:96px;padding:7px 9px 7px 7px}.choice-media{width:78px;height:82px}.choice-copy{padding-left:10px}.choice-copy strong{font-size:19px}.choice-copy span{display:none}.choice-arrow{width:32px;height:32px}.guide-overview{padding:24px 18px;gap:24px}.guide-overview-copy h2{font-size:36px}.guide-metrics{gap:3px}.guide-metric strong{font-size:20px}.guide-overview-media{height:220px}.guide-content-head{align-items:flex-start;flex-direction:column}.guide-content-head h2{font-size:34px}.guide-search{width:100%}.guide-section-button{grid-template-columns:46px 1fr 32px;gap:10px;padding:13px}.guide-section-number{width:46px;height:46px}.guide-section-title h3{font-size:19px}.guide-section-toggle{width:32px;height:32px}.guide-articles{grid-template-columns:1fr;padding:0 13px 13px}.guide-toc button{font-size:11.5px}}
+@media(prefers-reduced-motion:reduce){.guide-video,.guide-hero-copy,.reveal,.choice-media img{animation:none;transition:none}.reveal{opacity:1;transform:none}}
+`;
 
 export default function GuidePage() {
   const { categorySlug, subSlug } = useParams();
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [openSection, setOpenSection] = useState(subSlug || "");
+  const [activeSection, setActiveSection] = useState(subSlug || "");
+  const category = GUIDE_DATA.find((item) => item.slug === categorySlug) || GUIDE_DATA[0];
+  const media = {
+    "umrah-badal": { video: "/videos/umrah.mp4", poster: "/images/umrah1.jpg", image: "/images/umrah2.jpg" },
+    "hajj-badal": { video: "/videos/hajj.mp4", poster: "/images/hajj1.jpg", image: "/images/hajj2.jpg" },
+    donations: { video: "/videos/sadaqah.mp4", poster: "/images/Hajj%20Food%20Donation.jpg", image: "/images/Donate%20Iftar%20in%20Mecca.jpg" },
+  }[category.slug];
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" in window ? "auto" : "auto" });
-  }, [categorySlug, subSlug]);
+    setQuery("");
+    const initial = subSlug || category.sections[0]?.slug || "";
+    setOpenSection(initial);
+    setActiveSection(initial);
+  }, [categorySlug, subSlug, category]);
 
-  let content = null;
-  if (!categorySlug) {
-    content = <GuideHub />;
-  } else {
-    const cat = GUIDE_DATA.find((c) => c.slug === categorySlug);
-    if (!cat) {
-      content = <NotFound msg="Category not found" />;
-    } else if (!subSlug) {
-      content = <CategoryPage cat={cat} />;
-    } else {
-      const sub = cat.subcategories.find((s) => s.slug === subSlug);
-      content = sub ? <SubCategoryPage cat={cat} sub={sub} /> : <NotFound msg="Topic not found" />;
-    }
-  }
+  useEffect(() => {
+    const els = document.querySelectorAll(".reveal");
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("in");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [categorySlug, query]);
+
+  useEffect(() => {
+    if (!subSlug) return;
+    window.setTimeout(() => {
+      document.getElementById(`guide-${subSlug}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 180);
+  }, [subSlug, categorySlug]);
+
+  const visibleSections = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return category.sections;
+    return category.sections.filter((section) =>
+      section.name.toLowerCase().includes(needle) ||
+      section.about.toLowerCase().includes(needle) ||
+      section.articles.some((article) =>
+        article.title.toLowerCase().includes(needle) ||
+        article.text.toLowerCase().includes(needle)
+      )
+    );
+  }, [category, query]);
+
+  const scrollToSection = (slug) => {
+    setOpenSection(slug);
+    setActiveSection(slug);
+    document.getElementById(`guide-${slug}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
-    <div className="gc-wrap">
-      <GuideStyles />
-      {content}
-    </div>
+    <main className="guide-page">
+      <Navbar />
+      <style>{styles}</style>
+
+      <section className="guide-hero">
+        <video className="guide-video" autoPlay muted loop playsInline poster={media.poster} key={media.video}>
+          <source src={media.video} type="video/mp4" />
+        </video>
+        <div className="guide-hero-overlay" />
+        <div className="guide-hero-grain" />
+        <div className="guide-hero-inner">
+          <div className="guide-hero-copy">
+            <div className="guide-breadcrumb"><a href="/">Home</a><span>/</span><span>Guides</span></div>
+            <span className="guide-kicker">{category.eyebrow}</span>
+            <h1>{category.name}</h1>
+            <p>{category.heroLine}<br />{category.overview}</p>
+            <div className="guide-hero-actions">
+              <a className="guide-primary" href="/services">Explore packages
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </a>
+              <button className="guide-secondary" type="button" onClick={() => scrollToSection(category.sections[0].slug)}>Read the guide</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="guide-shell">
+        <nav className="guide-picker" aria-label="Choose a guide">
+          {GUIDE_DATA.map((item) => {
+            const itemImage = item.slug === "umrah-badal"
+              ? "/images/umrah1.jpg"
+              : item.slug === "hajj-badal"
+                ? "/images/hajj1.jpg"
+                : "/images/Hajj%20Food%20Donation.jpg";
+            return (
+              <button
+                type="button"
+                key={item.slug}
+                className={`guide-choice ${category.slug === item.slug ? "active" : ""}`}
+                onClick={() => navigate(`/guide/${item.slug}`)}
+              >
+                <span className="choice-media"><img src={itemImage} alt="" /></span>
+                <span className="choice-copy">
+                  <small>{item.eyebrow}</small>
+                  <strong>{item.name}</strong>
+                  <span>{item.desc}</span>
+                </span>
+                <span className="choice-arrow" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <section className="guide-overview reveal">
+          <div className="guide-overview-copy">
+            <small>Complete guide</small>
+            <h2>{category.name} at a glance</h2>
+            <p>{category.overview}</p>
+            <div className="guide-metrics">
+              <div className="guide-metric"><strong>{category.sections.length}</strong><span>Guides</span></div>
+              <div className="guide-metric"><strong>100%</strong><span>Documented</span></div>
+              <div className="guide-metric"><strong>24/7</strong><span>Tracking</span></div>
+            </div>
+          </div>
+          <div className="guide-overview-media"><img src={media.image} alt={`${category.name} in Makkah`} /></div>
+        </section>
+
+        <div className="guide-layout">
+          <aside className="guide-toc" aria-label="Guide sections">
+            <div className="guide-toc-title">On this page</div>
+            {category.sections.map((section, index) => (
+              <button
+                type="button"
+                key={section.slug}
+                className={activeSection === section.slug ? "active" : ""}
+                onClick={() => scrollToSection(section.slug)}
+              >
+                <span className="toc-number">{String(index + 1).padStart(2, "0")}</span>
+                {section.name}
+              </button>
+            ))}
+          </aside>
+
+          <div className="guide-content">
+            <div className="guide-content-head">
+              <div><h2>Detailed guide</h2><p>{visibleSections.length} topics in this guide</p></div>
+              <label className="guide-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${category.name}`} />
+              </label>
+            </div>
+
+            {visibleSections.length === 0 ? (
+              <div className="guide-empty">No matching topics found. Try another search.</div>
+            ) : visibleSections.map((section, sectionIndex) => (
+              <section id={`guide-${section.slug}`} key={section.slug} className={`guide-section reveal ${openSection === section.slug ? "open" : ""}`}>
+                <button
+                  type="button"
+                  className="guide-section-button"
+                  onClick={() => {
+                    setOpenSection(openSection === section.slug ? "" : section.slug);
+                    setActiveSection(section.slug);
+                  }}
+                >
+                  <span className="guide-section-number">{String(sectionIndex + 1).padStart(2, "0")}</span>
+                  <span className="guide-section-title"><h3>{section.name}</h3><p>{section.about}</p></span>
+                  <span className="guide-section-toggle" aria-hidden="true">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+                  </span>
+                </button>
+                <div className="guide-section-body">
+                  <div className="guide-articles">
+                    {section.articles.map((article) => (
+                      <article className="guide-article" key={article.title}>
+                        <h4>{article.title}</h4>
+                        <p>{article.text}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+      <Footer />
+    </main>
   );
 }

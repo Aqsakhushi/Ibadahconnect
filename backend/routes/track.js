@@ -10,6 +10,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const Order = require('../models/Order');
+const { JWT_SECRET } = require('../config/env');
 
 const router = express.Router();
 
@@ -47,7 +48,7 @@ function performerAuth(req, res, next) {
     return res.status(401).json({ message: 'Not authorized. Please log in.' });
   }
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = {
       id: decoded.id || decoded._id || decoded.userId,
       role: decoded.role,

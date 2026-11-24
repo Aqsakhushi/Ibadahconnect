@@ -30,8 +30,9 @@
 //   (rendered in App.jsx) stays untouched.
 // ============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import API from '../api';
 import {
   FaBoxOpen, FaCertificate, FaCheck, FaClipboardCheck, FaClock, FaCrosshairs,
   FaEnvelope, FaHourglassHalf, FaImage, FaLock, FaMapMarkedAlt, FaMapMarkerAlt,
@@ -42,7 +43,6 @@ import {
 const GREEN = '#1B5E20';
 const GREEN_DARK = '#0F3D14';
 const GOLD = '#D4AF37';
-const API = 'http://localhost:5000';
 const VIDEO_RE = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
 // Per-package step totals — must match PerformerDashboard blueprints.
@@ -106,7 +106,7 @@ function fixAssetUrl(u) {
   const s = pickStr(u).trim();
   if (!s) return '';
   if (/^https?:\/\//i.test(s) || s.startsWith('data:')) return s;
-  if (s.startsWith('/uploads')) return API + s;
+  if (s.startsWith('/uploads')) return s;
   return s;
 }
 
@@ -178,20 +178,19 @@ function extractOrder(data, code) {
 async function fetchOrderByCode(code) {
   const q = encodeURIComponent(pickStr(code).trim());
   const urls = [
-    `/api/orders/track/${q}`,
-    `/api/orders/tracking/${q}`,
-    `/api/orders/code/${q}`,
-    `/api/orders?code=${q}`,
-    `/api/orders/${q}`,
+    `/track/${q}`,
+    `/orders/track/${q}`,
+    `/orders/tracking/${q}`,
+    `/orders/code/${q}`,
+    `/orders?code=${q}`,
+    `/orders/${q}`,
   ];
   for (const u of urls) {
     try {
-      const res = await fetch(u);
-      if (!res.ok) continue;
-      const data = await res.json().catch(() => null);
+      const { data } = await API.get(u);
       const order = extractOrder(data, code);
       if (order) return order;
-    } catch (e) {
+    } catch {
       // try next endpoint
     }
   }
@@ -204,18 +203,17 @@ async function fetchLiveLocation(orderKey) {
   const q = encodeURIComponent(pickStr(orderKey).trim());
   if (!q) return null;
   const urls = [
-    `/api/live/${q}`,
-    `/api/live-location/${q}`,
-    `/api/orders/${q}/live`,
-    `/api/track/live/${q}`,
+    `/track/${q}/location`,
+    `/live/${q}`,
+    `/live-location/${q}`,
+    `/orders/${q}/live`,
+    `/track/live/${q}`,
   ];
   for (const u of urls) {
     try {
-      const res = await fetch(u);
-      if (!res.ok) continue;
-      const data = await res.json().catch(() => null);
+      const { data } = await API.get(u);
       if (!data) continue;
-      const d = data.live || data.location || data.data || data;
+      const d = data.latest || data.live || data.location || data.data || data;
       const lat = num(d.lat ?? d.latitude);
       const lng = num(d.lng ?? d.lon ?? d.longitude);
       if (lat == null || lng == null) continue;
@@ -226,7 +224,7 @@ async function fetchLiveLocation(orderKey) {
         updatedAt: d.updatedAt || d.at || d.time || new Date().toISOString(),
         performerName: pickStr(d.performerName || d.name),
       };
-    } catch (e) {
+    } catch {
       // try next endpoint
     }
   }
@@ -269,7 +267,11 @@ function normalizeOrder(raw) {
   ).trim();
   const performerCity = pickStr(o.performerCity || (o.performer && o.performer.city)).trim();
 
-  const loc = parseProofLocation(o.proofLocation);
+  const milestones = Array.isArray(o.milestones) ? o.milestones : [];
+  const latestMilestone = milestones.slice().reverse().find((milestone) =>
+    milestone && (milestone.proofLocation || milestone.proofUrl)
+  );
+  const loc = parseProofLocation(o.proofLocation || (latestMilestone && latestMilestone.proofLocation));
 
   let stepsDoneRaw = 0;
   const cand = [o.progress && o.progress.stepsDone, o.stepsDone, o.milestonesDone];
@@ -300,7 +302,7 @@ function normalizeOrder(raw) {
       });
     });
   }
-  const mainUrl = fixAssetUrl(pickStr(o.proofUrl));
+  const mainUrl = fixAssetUrl(pickStr(o.proofUrl || (latestMilestone && latestMilestone.proofUrl)));
   if (mainUrl) {
     pushProof({
       url: mainUrl,
@@ -406,7 +408,16 @@ function SponsorMap({ coords, live, kind, performerName, focusTick }) {
   const personMarkerRef = useRef(null);
   const accCircleRef = useRef(null);
   const stateRef = useRef({ coords, live });
-  stateRef.current = { coords, live };
+  const coordLat = coords?.lat;
+  const coordLng = coords?.lng;
+  const liveLat = live?.lat;
+  const liveLng = live?.lng;
+  const liveAccuracy = live?.accuracy;
+  const livePerformerName = live?.performerName || performerName;
+
+  useEffect(() => {
+    stateRef.current = { coords, live };
+  }, [coords, live]);
 
   useEffect(() => {
     let dead = false;
@@ -444,7 +455,7 @@ function SponsorMap({ coords, live, kind, performerName, focusTick }) {
     return () => {
       dead = true;
       if (mapRef.current) {
-        try { mapRef.current.remove(); } catch (e) { /* noop */ }
+        try { mapRef.current.remove(); } catch { /* noop */ }
         mapRef.current = null;
         proofMarkerRef.current = null;
         personMarkerRef.current = null;
@@ -473,41 +484,41 @@ function SponsorMap({ coords, live, kind, performerName, focusTick }) {
   useEffect(() => {
     const map = mapRef.current;
     const L = window.L;
-    if (!map || !L || !coords) return;
+    if (!map || !L || coordLat == null || coordLng == null) return;
     if (!proofMarkerRef.current) {
-      proofMarkerRef.current = L.marker([coords.lat, coords.lng], { icon: pinIcon(L, GOLD) })
+      proofMarkerRef.current = L.marker([coordLat, coordLng], { icon: pinIcon(L, GOLD) })
         .addTo(map)
         .bindPopup('Latest proof GPS');
     } else {
-      proofMarkerRef.current.setLatLng([coords.lat, coords.lng]);
+      proofMarkerRef.current.setLatLng([coordLat, coordLng]);
     }
-  }, [coords && coords.lat, coords && coords.lng]);
+  }, [coordLat, coordLng]);
 
   // Green live person marker updates — map follows the performer
   useEffect(() => {
     const map = mapRef.current;
     const L = window.L;
-    if (!map || !L || !live) return;
-    const label = `${live.performerName || performerName || 'Performer'} - live position`;
+    if (!map || !L || liveLat == null || liveLng == null) return;
+    const label = `${livePerformerName || 'Performer'} - live position`;
     if (!personMarkerRef.current) {
-      personMarkerRef.current = L.marker([live.lat, live.lng], { icon: personIcon(L), zIndexOffset: 500 })
+      personMarkerRef.current = L.marker([liveLat, liveLng], { icon: personIcon(L), zIndexOffset: 500 })
         .addTo(map)
         .bindPopup(label);
-      accCircleRef.current = L.circle([live.lat, live.lng], {
-        radius: live.accuracy || 60, color: '#1B5E20', weight: 1,
+      accCircleRef.current = L.circle([liveLat, liveLng], {
+        radius: liveAccuracy || 60, color: '#1B5E20', weight: 1,
         fillColor: '#1B5E20', fillOpacity: 0.12,
       }).addTo(map);
-      map.setView([live.lat, live.lng], 15);
+      map.setView([liveLat, liveLng], 15);
     } else {
-      personMarkerRef.current.setLatLng([live.lat, live.lng]);
+      personMarkerRef.current.setLatLng([liveLat, liveLng]);
       personMarkerRef.current.bindPopup(label);
       if (accCircleRef.current) {
-        accCircleRef.current.setLatLng([live.lat, live.lng]);
-        accCircleRef.current.setRadius(live.accuracy || 60);
+        accCircleRef.current.setLatLng([liveLat, liveLng]);
+        accCircleRef.current.setRadius(liveAccuracy || 60);
       }
-      map.panTo([live.lat, live.lng]);
+      map.panTo([liveLat, liveLng]);
     }
-  }, [live && live.lat, live && live.lng, live && live.updatedAt]);
+  }, [liveLat, liveLng, liveAccuracy, livePerformerName]);
 
   return (
     <div
@@ -675,15 +686,23 @@ function ProofGallery({ n }) {
 
 function LiveLocationCard({ n, live }) {
   const [focusTick, setFocusTick] = useState(0);
+  const [now, setNow] = useState(null);
   const hasCoords = Number.isFinite(n.loc.lat) && Number.isFinite(n.loc.lng);
   const coords = hasCoords ? { lat: n.loc.lat, lng: n.loc.lng } : null;
   const canLocate = !!(live || coords);
 
-  let ageSec = null;
-  if (live && live.updatedAt) {
-    const a = (Date.now() - new Date(live.updatedAt).getTime()) / 1000;
-    if (Number.isFinite(a)) ageSec = a;
-  }
+  useEffect(() => {
+    const initialTimer = setTimeout(() => setNow(Date.now()), 0);
+    const timer = setInterval(() => setNow(Date.now()), 10000);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(timer);
+    };
+  }, []);
+
+  const ageSec = live?.updatedAt && now != null
+    ? (now - new Date(live.updatedAt).getTime()) / 1000
+    : null;
   const liveFresh = ageSec != null && ageSec < 120;
   const seenText = ageSec == null ? '' : (ageSec < 60 ? '<1 MIN AGO' : `${Math.floor(ageSec / 60)} MIN AGO`);
 

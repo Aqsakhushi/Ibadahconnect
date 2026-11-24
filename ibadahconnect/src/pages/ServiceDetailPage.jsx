@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { FaStar } from 'react-icons/fa';
 import API from '../api';
 
@@ -11,14 +11,14 @@ const ServiceDetailPage = ({ openAuthModal }) => {
   const [service, setService] = useState(null);
 
   // Donations ka static data
-  const servicesData = {
+  const servicesData = useMemo(() => ({
     'hajj-badal': { name: "Hajj Badal", price: 300000, img: "/images/hajj.jpg", btn: "Book Hajj Badal", isCart: false, desc: "Fulfill the ultimate pillar of Islam on behalf of your deceased loved ones.", faqs: [{ q: "What is Hajj Badal?", a: "Performing Hajj on behalf of someone who is unable to do so." }] },
     'wheelchair': { name: "Wheelchair Donation", price: 25000, img: "/images/wheelchair.jpg", btn: "Add to Cart", isCart: true, desc: "Donate a wheelchair to Masjid al-Haram.", faqs: [{ q: "How does it work?", a: "We purchase a wheelchair on your behalf." }] },
     'roza-kushai': { name: "Roza Kushai (Iftar)", price: 5000, img: "/images/roza.jpg", btn: "Add to Cart", isCart: true, desc: "Arrange Iftar for a fasting person.", faqs: [{ q: "What is included?", a: "Dates, water, and a basic meal." }] },
     'tasbeeh': { name: "Tasbeeh Distribution", price: 400, img: "/images/tasbeeh.jpg", btn: "Add to Cart", isCart: true, desc: "Distribute prayer beads to worshippers in Haram.", faqs: [{ q: "How many?", a: "10 pieces of high-quality prayer beads." }] },
     'zamzam': { name: "Ab-e-Zamzam Delivery", price: 8000, img: "/images/zamzam.jpg", btn: "Add to Cart", isCart: true, desc: "Arrange pure Zamzam water to be distributed.", faqs: [{ q: "Quantity?", a: "5 Liters of pure Zamzam water." }] },
     'iftar-makkah': { name: "Iftar in Makkah", price: 40000, img: "/images/orphans.jpg", btn: "Add to Cart", isCart: true, desc: "Sponsor Iftar dinner for fasting people in Makkah.", faqs: [{ q: "What is included?", a: "A complete Iftar meal for fasting individuals." }] }
-  };
+  }), []);
 
   useEffect(() => {
     // Agar ID donations mein hai toh wo show karo, warna DB se fetch karo
@@ -48,7 +48,7 @@ const ServiceDetailPage = ({ openAuthModal }) => {
       };
       fetchPackage();
     }
-  }, [id]);
+  }, [id, servicesData]);
 
   const handleBookClick = () => {
     if (!user) {

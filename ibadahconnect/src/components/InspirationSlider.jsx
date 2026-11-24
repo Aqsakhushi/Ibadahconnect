@@ -13,7 +13,7 @@ const InspirationSlider = () => {
       setCurrentSlide((prev) => (prev + 1) % inspirations.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [inspirations.length]);
 
   return (
     <div className="relative h-48 md:h-56 rounded-2xl overflow-hidden shadow-lg mb-2">

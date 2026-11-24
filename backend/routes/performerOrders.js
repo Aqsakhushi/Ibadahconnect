@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const User = require('../models/User');
+const { generateForCompletedOrder } = require('../services/certificates');
 
 const router = express.Router();
 
@@ -156,6 +157,7 @@ router.put('/approve/:id', async (req, res) => {
       { new: true }
     );
     if (!order) return res.status(404).json({ message: 'Order not found' });
+    await generateForCompletedOrder(order);
     res.json({ ...order.toObject(), serviceTitle: titleOf(order) });
   } catch (e) {
     res.status(500).json({ message: e.message });

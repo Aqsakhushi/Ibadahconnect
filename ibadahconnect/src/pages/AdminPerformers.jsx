@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import API from '../api';
 import toast from 'react-hot-toast';
 import {
@@ -14,20 +14,20 @@ const AdminPerformers = () => {
   const [agencyInput, setAgencyInput] = useState({}); // { performerId: { name, website } }
   const [agencyBusy, setAgencyBusy] = useState('');
 
-  useEffect(() => {
-    fetchPerformers();
-  }, []);
-
-  const fetchPerformers = async () => {
+  const fetchPerformers = useCallback(async () => {
     try {
       const res = await API.get('/auth/performers');
       setPerformers(res.data);
       setLoading(false);
-    } catch (err) {
-      console.log("Error fetching performers");
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Error fetching performers.');
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchPerformers();
+  }, [fetchPerformers]);
 
   const handleVerify = async (id, isVerified = true) => {
     try {
@@ -46,7 +46,7 @@ const AdminPerformers = () => {
       setDeleteId(null);
       toast.success("Performer removed from platform.");
     } catch (err) {
-      toast.error("Error deleting performer.");
+      toast.error(err.response?.data?.message || "Error deleting performer.");
     }
   };
 

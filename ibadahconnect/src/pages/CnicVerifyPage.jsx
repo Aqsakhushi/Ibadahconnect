@@ -1,15 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-
-// Token helper — multiple storage keys support karta hai
-function getToken() {
-  return (
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken') ||
-    localStorage.getItem('ibadah_token') ||
-    ''
-  );
-}
+import API from '../api';
+import { getToken } from '../utils/auth';
 
 function StatusBadge({ s }) {
   const cls =
@@ -22,7 +14,7 @@ function StatusBadge({ s }) {
 
 export default function CnicVerifyPage() {
   const token = getToken();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(token));
   const [status, setStatus] = useState(null);
   const [cnicNumber, setCnicNumber] = useState('');
   const [frontFile, setFrontFile] = useState(null);
@@ -33,25 +25,21 @@ export default function CnicVerifyPage() {
   const [err, setErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/cnic/status', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) setErr(data.message || 'Failed to load CNIC status.');
-      else setStatus(data);
-    } catch {
-      setErr('Cannot reach server. Is the backend running?');
+      const { data } = await API.get('/auth/cnic/status');
+      setErr('');
+      setStatus(data);
+    } catch (error) {
+      setErr(error.response?.data?.message || 'Cannot reach server. Is the backend running?');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     if (token) loadStatus();
-    else setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadStatus, token]);
 
   const pickImage = (e, setFile, setPreview) => {
     const f = e.target.files && e.target.files[0];
@@ -73,22 +61,13 @@ export default function CnicVerifyPage() {
       fd.append('cnicNumber', cnicNumber);
       fd.append('cnicFront', frontFile);
       fd.append('cnicBack', backFile);
-      const res = await fetch('/api/auth/cnic/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErr(data.message || 'Upload failed.');
-      } else {
-        setMsg(data.message || 'CNIC submitted successfully!');
-        setFrontFile(null); setBackFile(null);
-        setFrontPreview(''); setBackPreview(''); setCnicNumber('');
-        loadStatus();
-      }
-    } catch {
-      setErr('Upload failed. Is the backend running?');
+      const { data } = await API.post('/auth/cnic/upload', fd);
+      setMsg(data.message || 'CNIC submitted successfully!');
+      setFrontFile(null); setBackFile(null);
+      setFrontPreview(''); setBackPreview(''); setCnicNumber('');
+      await loadStatus();
+    } catch (error) {
+      setErr(error.response?.data?.message || 'Upload failed. Is the backend running?');
     }
     setSubmitting(false);
   };

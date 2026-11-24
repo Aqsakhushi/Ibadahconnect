@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import BrandLogo from "../components/BrandLogo";
+import API from "../api";
+import { clearAuth, getCurrentUser, getToken, isTokenExpired, saveAuth } from "../utils/auth";
 
 const STYLE = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&display=swap');
@@ -115,6 +117,8 @@ const inputCls =
   "w-full rounded-xl border border-emerald-900/15 bg-white/70 px-4 py-3 text-sm text-emerald-950 outline-none transition placeholder:text-emerald-900/30 focus:border-emerald-600 focus:ring-4 focus:ring-emerald-600/10";
 
 export default function LoginPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState(localStorage.getItem("ic_remember_email") || "");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -122,15 +126,19 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    try {
-      const u = JSON.parse(localStorage.getItem("user") || "null");
-      if (u && (u.id || u._id)) {
-        const role = u.role || "Sponsor";
-        window.location.href =
-          role === "Admin" ? "/admin" : role === "Performer" ? "/performer-dashboard" : "/dashboard";
-      }
-    } catch (e) {}
-  }, []);
+    if (sessionStorage.getItem('authExpiredMessage')) {
+      sessionStorage.removeItem('authExpiredMessage');
+      toast.error('Session expired, please log in again.', { id: 'auth-expired' });
+    }
+
+    const token = getToken();
+    const user = getCurrentUser();
+    if (token && isTokenExpired(token)) clearAuth();
+    else if (token && user) {
+      const role = String(user.role || '').toLowerCase();
+      navigate(role === 'admin' ? '/admin' : role === 'performer' ? '/performer-dashboard' : '/dashboard', { replace: true });
+    }
+  }, [navigate]);
 
   const scrollDown = () => {
     const el = document.getElementById("auth-features");
@@ -146,40 +154,36 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Invalid email or password.");
-        setLoading(false);
-        return;
-      }
+      const { data } = await API.post('/auth/login', { email: email.trim(), password });
       const u = data.user || data;
       const shaped = { ...u, id: u.id || u._id, role: u.role || "Sponsor" };
-      localStorage.setItem("user", JSON.stringify(shaped));
-      if (data.token) localStorage.setItem("token", data.token);
+      saveAuth(shaped, data.token);
       if (remember) localStorage.setItem("ic_remember_email", email.trim());
       else localStorage.removeItem("ic_remember_email");
       toast.success("Welcome back!");
-      /* ⚡ NEW: ?next= support — checkout se aaye login ko wapas checkout pe bhejo (sirf Sponsor) */
+      const requestedPath =
+        sessionStorage.getItem('postLoginRedirect') ||
+        location.state?.from?.pathname &&
+          `${location.state.from.pathname}${location.state.from.search || ''}${location.state.from.hash || ''}`;
+      if (requestedPath) sessionStorage.removeItem('postLoginRedirect');
       const params = new URLSearchParams(window.location.search);
       const next = params.get("next");
+      const role = String(shaped.role).toLowerCase();
+      const canReturn = (path) => {
+        if (!path || !path.startsWith('/') || path.startsWith('//')) return false;
+        if (path.startsWith('/admin')) return role === 'admin';
+        if (path.startsWith('/performer') || path === '/self-family-portal' || path === '/cnic-verify') return role === 'performer';
+        return role === 'sponsor';
+      };
       const dest =
-        next && next.startsWith("/") && shaped.role === "Sponsor"
-          ? next
-          : shaped.role === "Admin"
-          ? "/admin"
-          : shaped.role === "Performer"
-          ? "/performer-dashboard"
-          : "/dashboard";
+        (canReturn(next) && next) ||
+        (canReturn(requestedPath) && requestedPath) ||
+        (role === 'admin' ? '/admin' : role === 'performer' ? '/performer-dashboard' : '/dashboard');
       setTimeout(() => {
-        window.location.href = dest;
+        navigate(dest, { replace: true });
       }, 800);
     } catch (err) {
-      toast.error("Server not reachable. Please make sure the backend is running.");
+      toast.error(err.response?.data?.message || "Server not reachable. Please make sure the backend is running.");
       setLoading(false);
     }
   };

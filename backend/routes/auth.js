@@ -6,6 +6,20 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const User = require('../models/User');
+const { JWT_SECRET } = require('../config/env');
+
+/* ══════════════════════════════════════════════════════════════
+   LOG THROTTLE (same pattern as orders.js)
+   Repeat notices print once per 10 min instead of on every hit.
+   ══════════════════════════════════════════════════════════════ */
+const _logOnce = new Map();
+function logOnce(key, msg, ttlMs = 10 * 60 * 1000) {
+  const now = Date.now();
+  const last = _logOnce.get(key) || 0;
+  if (now - last < ttlMs) return;
+  _logOnce.set(key, now);
+  console.log(msg);
+}
 
 /* ══════════════════════════════════════════════════════════════
    CNIC IMAGE UPLOAD (multer disk storage)
@@ -60,6 +74,9 @@ const publicUser = (u) => ({
   isVerified: !!u.isVerified,
   cnicStatus: u.cnicStatus || '',
 });
+
+/* Single place that signs login tokens (register + login use it) */
+const signToken = (user) => jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '7d' });
 
 /* ══════════════════════════════════════════════════════════════
    ROUTE 1 — REGISTER
@@ -128,16 +145,25 @@ router.post('/register', cnicUploadMiddleware, async (req, res) => {
 
     await user.save();
 
-    console.log(
-      `[REGISTER] New ${role}: ${firstName} ${lastName} <${email}>${cnicImageUrl ? ` | CNIC image: ${cnicImageUrl}` : ''}`
-    );
+    // FIX (token=undefined): register now ALSO returns a token, same
+    // shape as login. Previously only { message, user } came back, so
+    // any frontend code reading res.data.token after signup stored
+    // the string "undefined" and every later API call failed with 401.
+    const token = signToken(user);
+
+    console.log(`[REGISTER] New ${role}: ${firstName} ${lastName} <${email}>`);
 
     res.status(201).json({
       message: 'Account created successfully. You can now log in.',
+      token,
       user: publicUser(user),
     });
   } catch (err) {
-    console.error('[REGISTER ERROR]', err);
+    // Two saves racing on the same email end here (duplicate key)
+    if (err && err.code === 11000) {
+      return res.status(400).json({ message: 'This email is already registered. Please log in.' });
+    }
+    console.error('[REGISTER ERROR]', err.message);
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -171,7 +197,7 @@ router.post('/verify-cnic', cnicUploadMiddleware, async (req, res) => {
         }
       }
     } catch (e) {
-      console.log('[CNIC OCR] tesseract.js not available — manual entry required.');
+      logOnce('cnic-ocr-missing', '[CNIC OCR] tesseract.js not installed — image saved, number must be typed manually.');
     }
 
     res.json({
@@ -182,7 +208,7 @@ router.post('/verify-cnic', cnicUploadMiddleware, async (req, res) => {
       imageUrl,
     });
   } catch (err) {
-    console.error('[VERIFY-CNIC ERROR]', err);
+    console.error('[VERIFY-CNIC ERROR]', err.message);
     res.status(500).json({ message: 'CNIC verification failed. Please try again.' });
   }
 });
@@ -192,27 +218,25 @@ router.post('/verify-cnic', cnicUploadMiddleware, async (req, res) => {
    ══════════════════════════════════════════════════════════════ */
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
-    const user = await User.findOne({ email: (email || '').toLowerCase().trim() });
+    const user = await User.findOne({ email: String(email || '').toLowerCase().trim() });
     if (!user) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
-    const isMatch = await bcrypt.compare(password || '', user.password);
+    const isMatch = await bcrypt.compare(String(password || ''), user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET || 'ibadahconnect_jwt_secret',
-      { expiresIn: '7d' }
-    );
+    const token = signToken(user);
+
+    console.log(`[LOGIN] ${user.email} (${user.role || 'Sponsor'})`);
 
     res.json({ token, user: publicUser(user) });
   } catch (err) {
-    console.error('[LOGIN ERROR]', err);
+    console.error('[LOGIN ERROR]', err.message);
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -223,13 +247,16 @@ router.post('/login', async (req, res) => {
 router.get('/me', async (req, res) => {
   try {
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    let token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    // Old sessions may have stored the literal strings "undefined"/"null"
+    if (token === 'undefined' || token === 'null') token = '';
 
     if (!token) {
       return res.status(401).json({ message: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ibadahconnect_jwt_secret');
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {

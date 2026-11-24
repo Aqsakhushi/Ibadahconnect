@@ -1,28 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-
-/* Universal token helper — kahin se bhi token utha lo */
-const getToken = () => {
-  try {
-    const direct = ['token', 'authToken', 'accessToken', 'jwt'];
-    for (const store of [localStorage, sessionStorage]) {
-      for (const k of direct) {
-        const v = store.getItem(k);
-        if (v && !v.startsWith('{')) return v;
-      }
-      for (let i = 0; i < store.length; i++) {
-        const k = store.key(i);
-        try {
-          const raw = store.getItem(k);
-          if (!raw || !raw.startsWith('{')) continue;
-          const obj = JSON.parse(raw);
-          if (obj && obj.token) return obj.token;
-        } catch (e) {}
-      }
-    }
-  } catch (e) {}
-  return '';
-};
+import API from '../api';
+import { getToken } from '../utils/auth';
 
 const STATUS_STYLES = {
   Pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -124,26 +103,26 @@ const BookingCard = ({ o }) => {
 
 const MyBookings = () => {
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(getToken()));
   const [tab, setTab] = useState('upcoming');
   const [error, setError] = useState('');
   const token = getToken();
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
+    if (!token) return;
+    let active = true;
     (async () => {
       try {
-        const res = await fetch('/api/orders/mine', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setOrders(Array.isArray(data) ? data : data.orders || []);
-      } catch (e) {
-        setError('Could not load bookings. Make sure the backend server is running.');
+        const { data } = await API.get('/orders/mine');
+        if (active) setOrders(Array.isArray(data) ? data : data.orders || []);
+      } catch (error) {
+        if (active) setError(error.response?.data?.message || 'Could not load bookings. Make sure the backend server is running.');
+      } finally {
+        if (active) setLoading(false);
       }
-      setLoading(false);
     })();
-  }, []);
+    return () => { active = false; };
+  }, [token]);
 
   if (!token) {
     return (

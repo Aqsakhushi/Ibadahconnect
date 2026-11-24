@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BrandLogo from '../components/BrandLogo';
+import API from '../api';
+import { getCurrentUser, getToken, isTokenExpired } from '../utils/auth';
 
 /* ---------------------------------- DATA ---------------------------------- */
 
@@ -174,12 +176,13 @@ export default function RegisterPage() {
   /* already logged in? -> role-based redirect */
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('user') || 'null');
-      if (u) {
+      const u = getCurrentUser();
+      const token = getToken();
+      if (u && token && !isTokenExpired(token)) {
         const r = String(u.role || 'Sponsor').toLowerCase();
         navigate(r === 'admin' ? '/admin' : r === 'performer' ? '/performer-dashboard' : '/dashboard', { replace: true });
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* malformed legacy user data is ignored */ }
   }, [navigate]);
 
   /* toast auto-dismiss */
@@ -212,7 +215,7 @@ export default function RegisterPage() {
     setCnicScan({ fileName: file.name, preview, status: 'scanning' });
 
     /* OCR run — dynamic import taake page package ke bina bhi crash na ho */
-    let text = '';
+    let text;
     try {
       const mod = await import('tesseract.js');
       const Tesseract = mod.default || mod;
@@ -283,26 +286,12 @@ export default function RegisterPage() {
       };
       if (cnic) payload.idNumber = cnic;
 
-      let res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.status === 404) {
-        res = await fetch('/api/auth/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || data.error || 'Signup failed. Please try again.');
+      await API.post('/auth/register', payload);
 
       setToast({ type: 'success', text: 'Account created successfully! Redirecting to login...' });
       setTimeout(() => navigate('/login'), 1200);
     } catch (err) {
-      setToast({ type: 'error', text: err.message });
+      setToast({ type: 'error', text: err.response?.data?.message || err.message || 'Signup failed. Please try again.' });
     } finally {
       setLoading(false);
     }

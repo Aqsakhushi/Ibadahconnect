@@ -1,4 +1,4 @@
-import { FaCalendarCheck, FaQuran, FaBookOpen, FaHandHoldingHeart, FaBell, FaVideo, FaLaptop, FaShieldAlt, FaMoneyBillWave, FaBolt, FaCertificate } from 'react-icons/fa';
+import { FaCalendarCheck, FaQuran, FaBookOpen, FaHandHoldingHeart, FaVideo, FaShieldAlt, FaMoneyBillWave, FaBolt, FaCertificate } from 'react-icons/fa';
 
 const features = [
   { icon: <FaBookOpen />, title: "Performed by Students", desc: "Umrah Badal is carried out by verified students of Islamic universities in Makkah, with sincerity and full understanding of the ritual." },

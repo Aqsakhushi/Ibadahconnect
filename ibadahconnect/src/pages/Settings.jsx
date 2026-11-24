@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getCurrentUser, logout } from '../utils/auth';
 
 const PREFS_KEY = 'ic_prefs';
 const DEFAULT_PREFS = { emailNotifications: true, orderUpdates: true, marketingEmails: false };
@@ -23,9 +24,7 @@ const Toggle = ({ on, onChange }) => (
 
 const Settings = () => {
   const navigate = useNavigate();
-  const [user] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
-  });
+  const [user] = useState(getCurrentUser);
   const [prefs, setPrefs] = useState(getPrefs);
   const [saved, setSaved] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -40,8 +39,7 @@ const Settings = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    logout();
     navigate('/');
   };
 

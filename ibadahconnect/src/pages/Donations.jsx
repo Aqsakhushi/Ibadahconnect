@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 const KEY = 'ic_donations';
 const getHistory = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } };

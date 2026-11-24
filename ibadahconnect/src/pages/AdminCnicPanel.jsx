@@ -1,17 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import API from '../api';
 
-function getToken() {
-  return (
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken') ||
-    localStorage.getItem('ibadah_token') ||
-    ''
-  );
-}
-
-// Auth-protected image: token ke sath blob fetch karke show karta hai
-function AuthImage({ filename, token, label }) {
+function AuthImage({ filename, label }) {
   const [src, setSrc] = useState('');
   const [failed, setFailed] = useState(false);
 
@@ -19,12 +10,10 @@ function AuthImage({ filename, token, label }) {
     let objectUrl = '';
     (async () => {
       try {
-        const res = await fetch(`/api/auth/cnic/image/${filename}`, {
-          headers: { Authorization: `Bearer ${token}` }
+        const { data } = await API.get(`/auth/cnic/image/${filename}`, {
+          responseType: 'blob',
         });
-        if (!res.ok) { setFailed(true); return; }
-        const blob = await res.blob();
-        objectUrl = URL.createObjectURL(blob);
+        objectUrl = URL.createObjectURL(data);
         setSrc(objectUrl);
       } catch {
         setFailed(true);
@@ -60,43 +49,34 @@ function Badge({ s }) {
 
 export default function AdminCnicPanel() {
   const navigate = useNavigate();
-  const token = getToken();
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [actionMsg, setActionMsg] = useState('');
   const [busyId, setBusyId] = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    setErr('');
+  const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/cnic/admin/all', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) setErr(data.message || 'Failed to load submissions.');
-      else setSubs(Array.isArray(data) ? data : []);
-    } catch {
-      setErr('Cannot reach server. Is the backend running?');
+      const { data } = await API.get('/auth/cnic/admin/all');
+      setErr('');
+      setSubs(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setErr(error.response?.data?.message || 'Cannot reach server. Is the backend running?');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); }, [load]);
 
   const handleVerify = async (id) => {
     setBusyId(id); setActionMsg('');
     try {
-      const res = await fetch(`/api/auth/cnic/admin/verify/${id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const { data } = await API.put(`/auth/cnic/admin/verify/${id}`);
       setActionMsg(data.message || 'Done.');
-      load();
-    } catch {
-      setActionMsg('Action failed.');
+      await load();
+    } catch (error) {
+      setActionMsg(error.response?.data?.message || 'Action failed.');
     }
     setBusyId('');
   };
@@ -106,16 +86,11 @@ export default function AdminCnicPanel() {
     if (reason === null) return; // user ne cancel kiya
     setBusyId(id); setActionMsg('');
     try {
-      const res = await fetch(`/api/auth/cnic/admin/reject/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reason })
-      });
-      const data = await res.json();
+      const { data } = await API.put(`/auth/cnic/admin/reject/${id}`, { reason });
       setActionMsg(data.message || 'Done.');
-      load();
-    } catch {
-      setActionMsg('Action failed.');
+      await load();
+    } catch (error) {
+      setActionMsg(error.response?.data?.message || 'Action failed.');
     }
     setBusyId('');
   };
@@ -207,12 +182,12 @@ export default function AdminCnicPanel() {
 
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     {s.cnicFrontImage ? (
-                      <AuthImage filename={s.cnicFrontImage} token={token} label="Front" />
+                      <AuthImage filename={s.cnicFrontImage} label="Front" />
                     ) : (
                       <div className="bg-gray-100 rounded-lg h-40 flex items-center justify-center text-gray-400 text-sm">No front image</div>
                     )}
                     {s.cnicBackImage ? (
-                      <AuthImage filename={s.cnicBackImage} token={token} label="Back" />
+                      <AuthImage filename={s.cnicBackImage} label="Back" />
                     ) : (
                       <div className="bg-gray-100 rounded-lg h-40 flex items-center justify-center text-gray-400 text-sm">No back image</div>
                     )}

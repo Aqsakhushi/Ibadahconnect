@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../config/env');
 const Rule = require('../models/Rule');
 
 // Default rules — English version (aggregated by category for better UI parsing)
@@ -50,7 +51,7 @@ router.put('/', async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(token, JWT_SECRET);
     } catch (e) {
       return res.status(401).json({ message: 'Your session has expired. Please log in again.' });
     }

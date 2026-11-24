@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import './App.css';
 
 import ScrollToTop from './components/ScrollToTop';
@@ -11,55 +11,57 @@ import HowItWorks from './components/HowItWorks';
 import Testimonials from './components/Testimonials';
 import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
-import HowItWorksPage from './pages/HowItWorksPage';
-import FAQsPage from './pages/FAQsPage';
 import { Toaster } from 'react-hot-toast';
-import GuidePage from "./pages/GuidePage";
-import PerformerOnboarding from './pages/PerformerOnboarding';
+import RequireRole, { AuthSessionGuard } from './components/RequireRole';
 
-// Full-page Auth (new)
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import VerifyEmailPage from './pages/VerifyEmailPage';
+// Full-page Auth
+const HowItWorksPage = lazy(() => import('./pages/HowItWorksPage'));
+const FAQsPage = lazy(() => import('./pages/FAQsPage'));
+const GuidePage = lazy(() => import('./pages/GuidePage'));
+const PerformerOnboarding = lazy(() => import('./pages/PerformerOnboarding'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
+
 // Cart Provider
 import { CartProvider } from './context/CartContext';
 
 // Admin Pages
-import AdminDashboard, { AdminOverview } from './pages/AdminDashboard';
-import AdminUsers from './pages/AdminUsers';
-import AdminPackages from './pages/AdminPackages';
-import AdminBookings from './pages/AdminBookings';
-import AdminPerformers from './pages/AdminPerformers';
-import AdminHistory from './pages/AdminHistory';
-import AdminRules from './pages/AdminRules';
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminOverview = lazy(() => import('./pages/AdminDashboard').then((module) => ({ default: module.AdminOverview })));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+const AdminPackages = lazy(() => import('./pages/AdminPackages'));
+const AdminBookings = lazy(() => import('./pages/AdminBookings'));
+const AdminPerformers = lazy(() => import('./pages/AdminPerformers'));
+const AdminHistory = lazy(() => import('./pages/AdminHistory'));
+const AdminRules = lazy(() => import('./pages/AdminRules'));
 
 // Public & Sponsor Pages
-import Dashboard from './pages/Dashboard';
-import CheckoutPage from './pages/CheckoutPage';
-import ProfilePage from './pages/ProfilePage';
-import CartPage from './pages/CartPage';
-import WishlistPage from './pages/WishlistPage';
-import RemindersPage from './pages/RemindersPage';
-import PaymentResponse from './pages/PaymentResponse';
-import TrackOrder from './pages/TrackOrder';
-import PerformerProfile from './pages/PerformerProfile';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CheckoutPage = lazy(() => import('./pages/CheckoutPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const CartPage = lazy(() => import('./pages/CartPage'));
+const WishlistPage = lazy(() => import('./pages/WishlistPage'));
+const RemindersPage = lazy(() => import('./pages/RemindersPage'));
+const PaymentResponse = lazy(() => import('./pages/PaymentResponse'));
+const TrackOrder = lazy(() => import('./pages/TrackOrder'));
+const PerformerProfile = lazy(() => import('./pages/PerformerProfile'));
 
 // Performer Pages
-import PerformerDashboard from './pages/PerformerDashboard';
-import PerformerRulesPage from './pages/PerformerRulesPage';
-import SelfFamilyPortal from './pages/SelfFamilyPortal';
-import CnicVerifyPage from './pages/CnicVerifyPage';
-import AdminCnicPanel from './pages/AdminCnicPanel';
-import MyBookings from './pages/MyBookings';
-import Notifications from './pages/Notifications';
-import Donations from './pages/Donations';
-import Settings from './pages/Settings';
-import HelpSupport from './pages/HelpSupport';
-import ServiceDetailPage from './pages/ServiceDetailPage';
+const PerformerDashboard = lazy(() => import('./pages/PerformerDashboard'));
+const PerformerRulesPage = lazy(() => import('./pages/PerformerRulesPage'));
+const SelfFamilyPortal = lazy(() => import('./pages/SelfFamilyPortal'));
+const CnicVerifyPage = lazy(() => import('./pages/CnicVerifyPage'));
+const AdminCnicPanel = lazy(() => import('./pages/AdminCnicPanel'));
+const MyBookings = lazy(() => import('./pages/MyBookings'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Donations = lazy(() => import('./pages/Donations'));
+const Settings = lazy(() => import('./pages/Settings'));
+const HelpSupport = lazy(() => import('./pages/HelpSupport'));
+const ServiceDetailPage = lazy(() => import('./pages/ServiceDetailPage'));
 
-// NEW: Netflix-style services catalog page
-import ServicesPage from './pages/ServicesPage';
-
+// Netflix-style services catalog
+const ServicesPage = lazy(() => import('./pages/ServicesPage'));
 
 function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -71,6 +73,7 @@ function App() {
   return (
     <CartProvider>
       <BrowserRouter>
+        <AuthSessionGuard />
         <ScrollToTop />
 
         <Toaster
@@ -88,21 +91,21 @@ function App() {
           }}
         />
 
+        <Suspense fallback={null}>
         <Routes>
-
           {/* =========================
               FULL-PAGE AUTH
           ========================= */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/cnic-verify" element={<CnicVerifyPage />} />
-          <Route path="/admin/cnic" element={<AdminCnicPanel />} />
+          <Route path="/cnic-verify" element={<RequireRole roles={['Performer']}><CnicVerifyPage /></RequireRole>} />
+          <Route path="/admin/cnic" element={<RequireRole roles={['Admin']}><AdminCnicPanel /></RequireRole>} />
 
           {/* =========================
               ADMIN
           ========================= */}
-          <Route path="/admin" element={<AdminDashboard />}>
+          <Route path="/admin" element={<RequireRole roles={['Admin']}><AdminDashboard /></RequireRole>}>
             <Route index element={<AdminOverview />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="packages" element={<AdminPackages />} />
@@ -111,19 +114,25 @@ function App() {
             <Route path="history" element={<AdminHistory />} />
             <Route path="rules" element={<AdminRules />} />
           </Route>
-<Route path="/guide" element={<GuidePage />} />
-<Route path="/guide/:categorySlug" element={<GuidePage />} />
-<Route path="/guide/:categorySlug/:subSlug" element={<GuidePage />} />
+
+          {/* =========================
+              GUIDE
+          ========================= */}
+          <Route path="/guide" element={<GuidePage />} />
+          <Route path="/guide/:categorySlug" element={<GuidePage />} />
+          <Route path="/guide/:categorySlug/:subSlug" element={<GuidePage />} />
+
           {/* =========================
               PERFORMER
           ========================= */}
-          <Route path="/performer-onboarding" element={<PerformerOnboarding />} />
-          <Route path="/performer-dashboard" element={<PerformerDashboard />} />
-          <Route path="/performer-rules" element={<PerformerRulesPage />} />
-          <Route path="/self-family-portal" element={<SelfFamilyPortal />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/help-support" element={<HelpSupport />} />
-<Route path="/live-track/:orderId" element={<TrackOrder />} />
+          <Route path="/performer-onboarding" element={<RequireRole roles={['Performer']}><PerformerOnboarding /></RequireRole>} />
+          <Route path="/performer-dashboard" element={<RequireRole roles={['Performer']}><PerformerDashboard /></RequireRole>} />
+          <Route path="/performer-rules" element={<RequireRole roles={['Performer']}><PerformerRulesPage /></RequireRole>} />
+          <Route path="/self-family-portal" element={<RequireRole roles={['Performer']}><SelfFamilyPortal /></RequireRole>} />
+          <Route path="/settings" element={<RequireRole><Settings /></RequireRole>} />
+          <Route path="/help-support" element={<RequireRole><HelpSupport /></RequireRole>} />
+          <Route path="/live-track/:orderId" element={<TrackOrder />} />
+
           {/* =========================
               PUBLIC / SPONSOR
           ========================= */}
@@ -151,34 +160,39 @@ function App() {
                       }
                     />
 
-                    {/* HOW IT WORKS + FAQS (tumhari apni purani pages) */}
+                    {/* HOW IT WORKS + FAQS */}
                     <Route path="/how-it-works" element={<HowItWorksPage />} />
                     <Route path="/faqs" element={<FAQsPage />} />
 
-                    {/* NEW: NETFLIX-STYLE SERVICES CATALOG */}
+                    {/* NETFLIX-STYLE SERVICES CATALOG */}
                     <Route path="/services" element={<ServicesPage />} />
 
-                    {/* SERVICE DETAILS */}
+                    {/* SERVICE DETAILS (+ /package/:id alias for older links) */}
                     <Route
                       path="/service/:id"
                       element={<ServiceDetailPage openAuthModal={goToLogin} />}
                     />
-                    <Route path="/checkout" element={<CheckoutPage />} />
-                    <Route path="/checkout/:id" element={<CheckoutPage />} />
+                    <Route
+                      path="/package/:id"
+                      element={<ServiceDetailPage openAuthModal={goToLogin} />}
+                    />
+
+                    {/* CHECKOUT */}
+                    <Route path="/checkout" element={<RequireRole roles={['Sponsor']}><CheckoutPage /></RequireRole>} />
+                    <Route path="/checkout/:id" element={<RequireRole roles={['Sponsor']}><CheckoutPage /></RequireRole>} />
 
                     {/* PAYMENT RESPONSE */}
                     <Route path="/payment-response" element={<PaymentResponse />} />
-
                     {/* DASHBOARD */}
-                    <Route path="/dashboard" element={<Dashboard openAuthModal={goToLogin} />} />
+                    <Route path="/dashboard" element={<RequireRole roles={['Sponsor']}><Dashboard openAuthModal={goToLogin} /></RequireRole>} />
 
                     {/* PROFILE */}
-                    <Route path="/profile" element={<ProfilePage />} />
-                    <Route path="/personal-info" element={<ProfilePage />} />
+                    <Route path="/profile" element={<RequireRole roles={['Sponsor']}><ProfilePage /></RequireRole>} />
+                    <Route path="/personal-info" element={<RequireRole roles={['Sponsor']}><ProfilePage /></RequireRole>} />
 
-                    <Route path="/bookings" element={<MyBookings />} />
-                    <Route path="/notifications" element={<Notifications />} />
-                    <Route path="/donations" element={<Donations />} />
+                    <Route path="/bookings" element={<RequireRole roles={['Sponsor']}><MyBookings /></RequireRole>} />
+                    <Route path="/notifications" element={<RequireRole roles={['Sponsor']}><Notifications /></RequireRole>} />
+                    <Route path="/donations" element={<RequireRole roles={['Sponsor']}><Donations /></RequireRole>} />
 
                     {/* CART */}
                     <Route path="/cart" element={<CartPage />} />
@@ -211,6 +225,7 @@ function App() {
           />
 
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </CartProvider>
   );

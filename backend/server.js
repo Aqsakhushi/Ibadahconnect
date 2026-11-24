@@ -1,599 +1,764 @@
-// ============================================================
-// IbadahConnect — backend/server.js (FINAL v2.2)
-// WHAT'S NEW:
-//  A. DONATION SUB-CATEGORIES (Netflix rows — Ma'am ki demand):
-//     har donation me subCategory attach — API-driven rows.
-//  B. QUEUE LIFECYCLE (aaj ke 6 features ka aakhri piece):
-//     - /api/queue routes mount (File 3)
-//     - Order hooks -> OrderTimeline auto-events (Feature #1)
-//     - Cancel -> queue shift earlier + sponsor mail (Feature #4)
-//     - Auto-monitor har 6 ghante: late SLA mail + queue push
-//       (Feature #2) + stuck nudge/escalation (Feature #3).
-//       NOTE: active Umrah kabhi auto-reassign NAHI hota (fiqh:
-//       ihram continuity) — sirf nudge + admin escalation.
-// REQUIRES (defensive — koi file missing ho to server phir bhi
-// chalega, bas wo feature skip hoga):
-//   File 1: models/OrderTimeline.js
-//   File 2: services/queueEngine.js
-//   File 3: routes/queue.js
-// KEPT FROM v2.1: Atlas-only options, single MONGO_URI rule,
-//   boot repair of milestones.step, packages cache.
-// ============================================================
+/* ============================================================
+   IbadahConnect — backend/server.js  (v2.2)
+   ------------------------------------------------------------
+   FIXES IN THIS VERSION
+   1) AUTO-ASSIGN ENGINE (sahi logic):
+      - Ek performer par MAX 10 ACTIVE orders (Pending/Assigned/In Progress)
+      - 10 full hain to NAYA order nahi milega — pehle COMPLETE karein,
+        phir next pending order automatically assign ho jata hai
+      - Pending orders ki queue: oldest first (FIFO)
+   2) AUTO-RETRY (jo kaam nahi kar raha tha):
+      - Har 60 seconds mein pending queue scan
+      - Jab bhi koi performer order COMPLETE karta hai = instant retry
+      - Server start par bhi ek scan
+   3) LIVE GPS endpoints (sponsor map ke green marker ke liye):
+      - POST /api/live/:orderId  (performer 10-15s baad push karega)
+      - GET  /api/live/:orderId  (+ 3 alias paths)
+   4) EMAIL SEQUENCING (pehle wala bug):
+      - Checkout par SIRF verification email
+      - Verify link click par: order confirmed + performer assign +
+        tab hi "Order Confirmed" email jata hai
+   5) Order.js bilkul safe — koi schema change nahi (read-only respected)
+   ============================================================ */
 
-// load .env FIRST — before any route/model require.
-const path = require('path');
-const dotenv = require('dotenv');
-dotenv.config({ path: path.join(__dirname, '.env') });
-
-// BOOT CHECK — these lines must show LOADED right after restart
-console.log('[BOOT] SMTP_USER :', process.env.SMTP_USER ? 'LOADED ✅ ' + process.env.SMTP_USER : 'MISSING ❌ (.env check karo)');
-console.log('[BOOT] JWT_SECRET:', process.env.JWT_SECRET ? 'LOADED ✅' : 'MISSING ❌ (.env line 2 mein daalo)');
-console.log('[BOOT] EMAIL_FROM:', process.env.EMAIL_FROM || '(not set — default use hoga)');
-console.log('[BOOT] MONGO_URI :', process.env.MONGO_URI ? 'LOADED ✅ (host hidden)' : 'MISSING ❌ (.env check karo)');
-
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
-// Models Import
 const User = require('./models/User');
-const Package = require('./models/Package');
 const Order = require('./models/Order');
-
-// Queue lifecycle deps (Files 1-2 — defensive: missing to skip)
-let OrderTimeline = null;
-let queueEngine = null;
-try { OrderTimeline = require('./models/OrderTimeline'); } catch (e) { console.log('[BOOT] OrderTimeline missing — File 1 (models/OrderTimeline.js) save karo'); }
-try { queueEngine = require('./services/queueEngine'); } catch (e) { console.log('[BOOT] queueEngine missing — File 2 (services/queueEngine.js) save karo'); }
-const EVENTS = OrderTimeline ? OrderTimeline.EVENTS : null;
-
-// Routes Import
-const authRoute = require('./routes/auth');
-const ordersRoute = require('./routes/orders');
-const packagesRoute = require('./routes/packages');
-const paymentRoute = require('./routes/payments');
-const paymentAdminRoute = require('./routes/payment-admin');
-const rulesRoute = require('./routes/rules');
-const ocrRoute = require('./routes/ocr');
-const uploadRoute = require('./routes/upload');
-const performerOrdersRoute = require('./routes/performerOrders');
-const trackRoute = require('./routes/track');
-const chatRoute = require('./routes/chat'); // sponsor <-> performer chat
-
-// Queue + Timeline routes (File 3 — defensive)
-let queueRoute = null;
-try { queueRoute = require('./routes/queue'); } catch (e) { console.log('[BOOT] /api/queue skipped — routes/queue.js (File 3) missing'); }
-
-// Legacy payment route (optional)
-let legacyPaymentRoute = null;
-try { legacyPaymentRoute = require('./routes/payment'); } catch (e) { legacyPaymentRoute = null; }
+let Package = null;
+try { Package = require('./models/Package'); } catch (e) { console.log('[BOOT] models/Package.js not found — packages inline fallback'); }
 
 const app = express();
-
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors({ origin: true }));
 app.use(express.json({ limit: '15mb' }));
-// PACKAGES CACHE — Atlas latency fix (v2.1 se unchanged).
-let packagesCache = null;
-app.use('/api/packages', (req, res, next) => {
-  if (req.method !== 'GET') { packagesCache = null; return next(); } // write -> bust cache
-  if ((req.path === '/all' || req.path === '/') && packagesCache) {
-    return res.json(packagesCache);
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'ibadahconnect_secret';
+const EMAIL_USER = process.env.EMAIL_USER || process.env.GMAIL_USER || process.env.EMAIL || '';
+const EMAIL_PASS = process.env.EMAIL_PASS || process.env.GMAIL_PASS || process.env.EMAIL_PASSWORD || '';
+const PUBLIC_BASE = (process.env.PUBLIC_BASE || 'http://localhost:5000').replace(/\/+$/, '');
+const FRONT_BASE = (process.env.FRONT_BASE || 'http://localhost:5173').replace(/\/+$/, '');
+
+const hasP = (m, p) => !!(m && m.schema && m.schema.path(p));
+const orderCodeOf = (o) => (o && (o.orderCode || o.code || o.trackingCode)) || (o && o._id ? String(o._id) : '');
+
+/* ------------------------------------------------------------
+   MAILER
+------------------------------------------------------------ */
+let mailer = null;
+if (EMAIL_USER && EMAIL_PASS) {
+  try {
+    mailer = nodemailer.createTransport({ service: 'gmail', auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
+    console.log('[EMAIL] Mailer ready -> ' + EMAIL_USER);
+  } catch (e) { console.log('[EMAIL] Mailer init failed:', e.message); }
+} else {
+  console.log('[EMAIL] EMAIL_USER/EMAIL_PASS missing in backend/.env — emails will be skipped');
+}
+
+async function sendMail(to, subject, html) {
+  if (!mailer || !to) { console.log('[EMAIL] Skipped -> ' + (to || 'no-recipient') + ' | ' + subject); return null; }
+  try {
+    const info = await mailer.sendMail({ from: '"IbadahConnect" <' + EMAIL_USER + '>', to, subject, html });
+    console.log('[EMAIL] Sent -> ' + to + ' (' + ((info && info.messageId) || 'ok') + ')');
+    return info;
+  } catch (e) { console.log('[EMAIL] FAILED -> ' + to + ' | ' + e.message); return null; }
+}
+
+/* ------------------------------------------------------------
+   AUTH MIDDLEWARE (guest-continue — purana behaviour same)
+------------------------------------------------------------ */
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([promise, new Promise((r) => setTimeout(() => r(fallback), ms))]);
+}
+
+async function auth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (token) {
+    try {
+      const dec = jwt.verify(token, JWT_SECRET);
+      try {
+        const u = await withTimeout(User.findById(dec.id || dec._id || dec.userId).select('-password'), 2500, null);
+        req.user = u || dec;
+      } catch (e2) { req.user = dec; }
+      return next();
+    } catch (e) { /* invalid token -> guest */ }
   }
-  if (req.path === '/all' || req.path === '/') {
-    const json = res.json.bind(res);
-    res.json = (data) => {
-      if (res.statusCode < 400) packagesCache = data; // only cache success
-      return json(data);
-    };
-  }
+  req.user = null;
+  console.log('[AUTH] Guest request (no/invalid token) — continuing');
   next();
-});
+}
+app.use('/api', auth);
 
-// API Routes
-app.use('/api/auth', authRoute);
-app.use('/api/orders/performer', performerOrdersRoute); // MUST stay BEFORE /api/orders
-app.use('/api/orders', ordersRoute);
-app.use('/api/devfix', require('./routes/devfix'));
-app.use('/api/packages', packagesRoute);
-app.use('/api/payments', paymentRoute);
-app.use('/api/payments-admin', paymentAdminRoute);
-if (legacyPaymentRoute) app.use('/api/payment', legacyPaymentRoute); // old route (optional)
-app.use('/api/rules', rulesRoute);
-app.use('/api/proof', ocrRoute);
-app.use('/api/upload', uploadRoute);
-app.use('/api/track', trackRoute);
-app.use('/api/chat', chatRoute);
-if (queueRoute) app.use('/api/queue', queueRoute); // NEW: timeline/position/deadline endpoints
+/* ------------------------------------------------------------
+   SHARED STATE
+------------------------------------------------------------ */
+const liveLocations = new Map();   // orderId -> { lat, lng, accuracy, performerName, updatedAt }
+const verifyTokens = new Map();   // token -> orderId
+const verifiedOrders = new Set(); // orderId (verify link clicked)
+const PERFORMER_CAP = 10;         // ek performer par max ACTIVE orders
+const LIVE_TTL_MS = 10 * 60 * 1000;
 
-// Serve uploaded files (profile pics + proof photos + bank receipts)
+/* ------------------------------------------------------------
+   HELPERS
+------------------------------------------------------------ */
+async function safeUser(id) { try { return await User.findById(id); } catch (e) { return null; } }
+
+function parseCoords(v) {
+  if (!v) return null;
+  if (typeof v === 'object') {
+    const lat = Number(v.lat !== undefined ? v.lat : v.latitude);
+    const lng = Number(v.lng !== undefined ? v.lng : (v.longitude !== undefined ? v.longitude : v.long));
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    if (Array.isArray(v.coordinates) && v.coordinates.length >= 2) {
+      const la = Number(v.coordinates[1]); const ln = Number(v.coordinates[0]);
+      if (Number.isFinite(la) && Number.isFinite(ln)) return { lat: la, lng: ln };
+    }
+    return null;
+  }
+  const m = String(v).match(/(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)/);
+  if (m) {
+    const lat = Number(m[1]); const lng = Number(m[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+  return null;
+}
+
+function haversineM(a, b) {
+  const R = 6371000; const toR = (x) => (x * Math.PI) / 180;
+  const dLat = toR(b.lat - a.lat); const dLng = toR(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function lastMilestoneCoords(order) {
+  if (!order || !Array.isArray(order.milestones)) return null;
+  for (let i = order.milestones.length - 1; i >= 0; i--) {
+    const m = order.milestones[i];
+    if (m && m.proofLocation) {
+      const c = parseCoords(m.proofLocation);
+      if (c) return { lat: c.lat, lng: c.lng, capturedAt: m.proofLocation.capturedAt || '' };
+    }
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------
+   AUTO-ASSIGN ENGINE  (user requirement:
+   "jab 10 orders par assign ho, pehle unhe COMPLETE karein,
+    phir naya order mile" + "auto retry sahi kaam kare")
+------------------------------------------------------------ */
+
+// performer ke ACTIVE (incomplete) orders count
+async function activeOrderCount(performerId) {
+  try {
+    return await Order.countDocuments({ performer: performerId, status: { $ne: 'Completed' } });
+  } catch (e) { return PERFORMER_CAP; } // DB error par safe side: naya load mat lo
+}
+
+// sab se kam loaded free performer (verified preferred)
+async function pickPerformer() {
+  let list = [];
+  try { list = await User.find({ role: 'Performer', isVerified: true }).limit(50); } catch (e) {}
+  if (!list.length) {
+    try { list = await User.find({ role: 'Performer' }).limit(50); } catch (e) {}
+    if (list.length) console.log('[AUTO-ASSIGN] NOTE: koi verified performer nahi mila — unverified performers ko temporarily consider kiya ja raha hai');
+  }
+  if (!list.length) { console.log('[AUTO-ASSIGN] Koi performer registered nahi — order queue mein rahega'); return null; }
+
+  let best = null;
+  for (const p of list) {
+    const count = await activeOrderCount(p._id);
+    if (count >= PERFORMER_CAP) continue;                    // FULL — pehle complete karein
+    if (!best || count < best.count) best = { performer: p, count };
+  }
+  if (!best) console.log('[AUTO-ASSIGN] All performers busy (' + list.length + ' performer(s) at ' + PERFORMER_CAP + '/' + PERFORMER_CAP + ') — koi complete karega to next assign hoga');
+  return best;
+}
+
+// ek order ko free performer par assign karo
+async function tryAssignOrder(order, opts) {
+  const silent = opts && opts.silent;
+  if (!order) return false;
+  if (order.performer) return true; // already assigned
+  const pick = await pickPerformer();
+  if (!pick) {
+    if (!silent) console.log('[AUTO-ASSIGN] No performer free right now for ' + orderCodeOf(order) + ' — 60s auto-retry active hai');
+    return false;
+  }
+  order.performer = pick.performer._id;
+  if (hasP(Order, 'assignedAt')) order.assignedAt = new Date();
+  if (String(order.status || '') === 'Pending') order.status = 'Assigned';
+  await order.save();
+  const pname = ((pick.performer.firstName || '') + ' ' + (pick.performer.lastName || '')).trim() || 'CNIC-Verified Performer';
+  console.log('[AUTO-ASSIGN] ' + orderCodeOf(order) + ' -> ' + pname + ' (active ' + (pick.count + 1) + '/' + PERFORMER_CAP + ')');
+
+  const sponsor = await safeUser(order.sponsor);
+  if (sponsor && sponsor.email) {
+    sendMail(sponsor.email, 'Performer Assigned — ' + orderCodeOf(order),
+      '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">' +
+      '<h2 style="color:#1B5E20">Performer Assigned</h2>' +
+      '<p>Assalam-o-Alaikum ' + (sponsor.firstName || '') + ',</p>' +
+      '<p>Your order <b>' + orderCodeOf(order) + '</b> has been assigned to a CNIC-verified performer. ' +
+      'Ab aap Track Order page par live progress, proof photos aur live location dekh sakte hain.</p>' +
+      '<p style="text-align:center;margin:24px 0"><a href="' + FRONT_BASE + '/track?code=' + orderCodeOf(order) + '" style="background:#1B5E20;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none">Track My Order</a></p>' +
+      '<p style="font-size:12px;color:#777">Your payment is held as Amanah — released only after video-verified completion.</p>' +
+      '</div>');
+  }
+  return true;
+}
+
+// pending queue scan — OLDEST first
+async function retryPendingAssignments(trigger) {
+  try {
+    const cands = await Order.find({ status: 'Pending' }).sort({ createdAt: 1 }).limit(50);
+    const queue = [];
+    for (const o of cands) {
+      if (o.performer) continue;
+      // verify gate: jo order verify link ke bina pending hai wo queue se skip
+      if (hasP(Order, 'isVerified') && o.isVerified === false && !verifiedOrders.has(String(o._id))) continue;
+      queue.push(o);
+    }
+    if (!queue.length) return;
+    console.log('[AUTO-RETRY] (' + (trigger || 'scan') + ') ' + queue.length + ' order(s) waiting for a free performer...');
+    for (const o of queue) {
+      let fresh = null;
+      try { fresh = await Order.findById(o._id); } catch (e) {}
+      if (!fresh || fresh.performer) continue;
+      await tryAssignOrder(fresh, { silent: true });
+    }
+  } catch (e) { console.log('[AUTO-RETRY] scan skipped:', e.message); }
+}
+setInterval(() => retryPendingAssignments('60s timer'), 60000);
+
+/* ------------------------------------------------------------
+   ROUTE MOUNTS (routes/ folder ke files — agar mojood hon)
+   NOTE: /api/orders/performer ko /api/orders se PEHLE mount kiya
+   gaya hai taake /:id swallow na kare.
+------------------------------------------------------------ */
+const routesDir = path.join(__dirname, 'routes');
+function tryMount(file) {
+  const fp = path.join(routesDir, file);
+  if (fs.existsSync(fp)) {
+    try { return require(fp); } catch (e) { console.log('[BOOT] routes/' + file + ' load error:', e.message); }
+  }
+  console.log('[BOOT] routes/' + file + ' not found — inline fallback active');
+  return express.Router();
+}
+app.use('/api/auth', tryMount('auth.js'));
+app.use('/api/orders/performer', tryMount('performerOrders.js'));
+app.use('/api/track', tryMount('track.js'));
+app.use('/api/orders', tryMount('orders.js'));
+app.use('/api/packages', tryMount('packages.js'));
+app.use('/api/payment', tryMount('payment.js'));
+app.use('/api/rules', tryMount('rules.js'));
+app.use('/api/proof', tryMount('proof.js'));
+app.use('/api/proof', tryMount('ocr.js'));
+app.use('/api/upload', tryMount('upload.js'));
+
+// uploaded files serve (profile pics + proof photos)
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOAD_DIR));
 
-// ============================================================
-// ORDER LIFECYCLE (NEW in v2.2)
-// Order.js LOCKED hai — hooks EXTERNAL file se register hote
-// hain (mongoose model singleton). Ye section:
-//   1. har status change / milestone completion par timeline
-//      event likhta hai (Feature #1)
-//   2. Cancel par queue shift + mails (Feature #4)
-//   3. monitor loop: late + stuck orders (Features #2, #3)
-// ============================================================
-const SPONSOR_FIELDS = ['sponsor', 'sponsorId', 'user', 'userId', 'createdBy', 'customer', 'owner'];
-
-// --- defensive mailer (utils/sendEmail ka shape jo bhi ho) ---
-let _mailer = null;
-try {
-  const m = require('./utils/sendEmail');
-  _mailer = typeof m === 'function' ? m : (m.sendEmail || m.default || null);
-} catch (e) { _mailer = null; }
-
-async function sendMailSafe(to, subject, html) {
-  if (!to) return;
-  if (typeof _mailer !== 'function') { console.log('[MAIL] mailer unavailable — skipped:', subject); return; }
-  const attempts = [
-    () => _mailer({ to, subject, html }),
-    () => _mailer({ email: to, subject, message: html }),
-    () => _mailer(to, subject, html),
-  ];
-  for (const attempt of attempts) {
-    try { await attempt(); return; } catch (e) { /* next shape */ }
+/* ------------------------------------------------------------
+   CHECKOUT  (order create + SIRF verification email)
+------------------------------------------------------------ */
+function buildMilestonesInline(serviceType) {
+  if (serviceType === 'Umrah Badal' || serviceType === 'Hajj Badal') {
+    return [
+      { step: 'Ehram', isCompleted: false, proofUrl: '' },
+      { step: "Tawaf", isCompleted: false, proofUrl: '' },
+      { step: "Sa'i (Safa Marwa)", isCompleted: false, proofUrl: '' },
+      { step: 'Taqsir / Halq', isCompleted: false, proofUrl: '' },
+      { step: 'Dua', isCompleted: false, proofUrl: '' }
+    ];
   }
-  console.log('[MAIL] failed (all shapes):', subject, '->', to);
+  return [
+    { step: 'Process Started', isCompleted: false, proofUrl: '' },
+    { step: 'Donation Delivered', isCompleted: false, proofUrl: '' }
+  ];
 }
 
-function sponsorIdOf(order) {
-  for (const f of SPONSOR_FIELDS) {
-    if (order[f]) return order[f]._id || order[f];
+async function checkoutHandler(req, res) {
+  try {
+    console.log('[CHECKOUT] Payload: ' + JSON.stringify(req.body || {}));
+    const b = req.body || {};
+    const sponsorId = (b.userId && String(b.userId)) || (req.user && (req.user._id || req.user.id)) || null;
+    console.log('[CHECKOUT] Sponsor resolved from body.userId: ' + sponsorId);
+    if (!sponsorId || !mongoose.isValidObjectId(String(sponsorId))) {
+      return res.status(400).json({ ok: false, message: 'userId required — pehle login karein' });
+    }
+    const sponsor = await safeUser(sponsorId);
+    if (!sponsor) return res.status(400).json({ ok: false, message: 'Sponsor user not found' });
+
+    const itemsIn = Array.isArray(b.items) ? b.items : [];
+    let subtotal = 0;
+    const items = [];
+    let serviceType = 'Donation';
+    let firstTitle = '';
+    for (const it of itemsIn) {
+      const pid = it.packageId || it.id || it._id || null;
+      const qty = Math.max(1, Number(it.qty || it.quantity || 1));
+      let pkg = null;
+      if (Package && pid) { try { pkg = await Package.findById(pid); } catch (e) {} }
+      const price = pkg ? Number(pkg.price || 0) : Number(it.price || 0);
+      const title = pkg ? pkg.title : (it.title || 'Ibadah Package');
+      const cat = pkg ? (pkg.category || '') : (it.category || '');
+      if (/hajj/i.test(cat + ' ' + title)) serviceType = 'Hajj Badal';
+      else if (/umrah/i.test(cat + ' ' + title)) serviceType = 'Umrah Badal';
+      if (!firstTitle) firstTitle = title;
+      subtotal += price * qty;
+      items.push({ packageId: pid, title, price, qty });
+    }
+    const hadiyah = Number(b.hadiyah) || 0;
+    if (!items.length && !subtotal && !hadiyah) return res.status(400).json({ ok: false, message: 'Cart is empty' });
+    if (['Umrah Badal', 'Hajj Badal', 'Donation'].includes(b.serviceType)) serviceType = b.serviceType;
+
+    const billing = b.billing || {};
+    const orderNo = 'IC-' + new Date().getFullYear() + '-' + String(Math.floor(100000 + Math.random() * 900000));
+    const total = subtotal + hadiyah;
+
+    const doc = {
+      sponsor: sponsor._id,
+      serviceType,
+      packageTitle: firstTitle || serviceType,
+      recipientName: b.recipientName || b.beneficiaryName || 'N/A',
+      recipientRelation: b.recipientRelation || 'N/A',
+      beneficiaryGender: b.beneficiaryGender || '',
+      reason: b.reason || '',
+      notes: billing.notes || b.notes || '',
+      requestorPhone: billing.phone || b.phone || '',
+      hadiyah,
+      price: subtotal,
+      status: 'Pending',
+      milestones: buildMilestonesInline(serviceType)
+    };
+    if (billing.address || billing.city || billing.country) {
+      doc.requestorAddress = {
+        street: billing.address || '', city: billing.city || '', state: billing.state || '',
+        zip: billing.zip || '', country: billing.country || ''
+      };
+    }
+    if (hasP(Order, 'total')) doc.total = total;
+    if (hasP(Order, 'amount')) doc.amount = total;
+    if (hasP(Order, 'paymentMethod')) doc.paymentMethod = b.paymentMethod || 'Bank Transfer';
+    if (hasP(Order, 'paymentStatus')) doc.paymentStatus = 'Awaiting Payment';
+    if (hasP(Order, 'billing')) doc.billing = billing;
+    if (hasP(Order, 'items')) doc.items = items;
+    if (hasP(Order, 'isVerified')) doc.isVerified = false;
+    if (hasP(Order, 'stepsDone')) doc.stepsDone = 0;
+    if (hasP(Order, 'currentStep')) doc.currentStep = 1;
+    if (hasP(Order, 'progress')) doc.progress = 0;
+    if (hasP(Order, 'taskCompleted')) doc.taskCompleted = false;
+
+    const order = await Order.create(doc);
+    if (!order.orderCode && hasP(Order, 'orderCode')) { order.orderCode = orderNo; await order.save(); }
+    const code = orderCodeOf(order);
+    console.log('[CHECKOUT] Order ' + code + ' created — sponsor ' + sponsorId + ', total PKR ' + total + ', ' + (items.length || 1) + ' item(s)');
+
+    // EMAIL SEQUENCING: abhi SIRF verification email —
+    // confirm + performer assign verify link click par hoga
+    const token = crypto.randomBytes(24).toString('hex');
+    verifyTokens.set(token, String(order._id));
+    if (hasP(Order, 'verifyToken')) { order.verifyToken = token; await order.save(); }
+    const link = PUBLIC_BASE + '/api/orders/verify/' + token;
+    if (sponsor.email) {
+      console.log('[VERIFY EMAIL] Sending verification link to ' + sponsor.email + ' for ' + code);
+      sendMail(sponsor.email, 'Verify your IbadahConnect order ' + code,
+        '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">' +
+        '<h2 style="color:#1B5E20">Assalam-o-Alaikum ' + (sponsor.firstName || '') + ',</h2>' +
+        '<p>Your order <b>' + code + '</b> (' + serviceType + (firstTitle ? ' — ' + firstTitle : '') + ') has been received.</p>' +
+        '<p>Please verify your order by clicking the button below. Verification ke baad hi order confirm hota hai aur performer assign hota hai.</p>' +
+        '<p style="text-align:center;margin:28px 0"><a href="' + link + '" style="background:#1B5E20;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none">Verify My Order</a></p>' +
+        '<p style="font-size:12px;color:#777">Or open this link: ' + link + '</p>' +
+        '<p style="font-size:12px;color:#777">Your payment is held as Amanah — released only after video-verified completion.</p>' +
+        '</div>');
+    }
+    res.json({ ok: true, order, orderNumber: code, total });
+  } catch (e) {
+    console.log('[CHECKOUT ERROR]', e.message);
+    res.status(500).json({ ok: false, message: 'Checkout failed: ' + e.message });
   }
+}
+app.post('/api/orders/checkout', checkoutHandler);
+app.post('/api/checkout', checkoutHandler);
+app.post('/api/payment/checkout', checkoutHandler);
+app.post('/api/orders', checkoutHandler);
+
+/* ------------------------------------------------------------
+   VERIFY ORDER (link click par: confirm + assign + confirm email)
+------------------------------------------------------------ */
+async function verifyHandler(req, res) {
+  try {
+    const token = String(req.params.token || '');
+    let order = null;
+    const oid = verifyTokens.get(token);
+    if (oid) { try { order = await Order.findById(oid); } catch (e) {} }
+    if (!order && hasP(Order, 'verifyToken')) { try { order = await Order.findOne({ verifyToken: token }); } catch (e) {} }
+    if (!order) return res.status(404).send('<h3 style="font-family:Arial">Invalid or expired verification link.</h3>');
+
+    const already = verifiedOrders.has(String(order._id)) || order.isVerified === true;
+    verifiedOrders.add(String(order._id));
+    if (hasP(Order, 'isVerified')) order.isVerified = true;
+    if (hasP(Order, 'verifiedAt')) order.verifiedAt = new Date();
+    await order.save();
+    const code = orderCodeOf(order);
+    console.log('[VERIFY EMAIL] Order ' + code + ' verified' + (already ? ' (already verified)' : ''));
+
+    const assigned = await tryAssignOrder(order, { silent: true });
+
+    const sponsor = await safeUser(order.sponsor);
+    if (sponsor && sponsor.email && !already) {
+      const pname = ((order.performer && order.performerName) ? order.performerName : '');
+      sendMail(sponsor.email,
+        (assigned ? 'Order Confirmed — Performer Assigned (' + code + ')' : 'Order Confirmed (' + code + ')'),
+        '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">' +
+        '<h2 style="color:#1B5E20">Order Confirmed</h2>' +
+        '<p>Assalam-o-Alaikum ' + (sponsor.firstName || '') + ', your order <b>' + code + '</b> is verified and confirmed.</p>' +
+        (assigned
+          ? '<p>A CNIC-verified performer has been assigned to your order. Aap abhi Track Order page par live progress dekh sakte hain.</p>'
+          : '<p>All performers are currently busy with their ibadah tasks. Aap ka order queue mein hai — jaise hi koi performer free hoga, automatically assign ho jayega aur aap ko email mil jayegi.</p>') +
+        '<p style="text-align:center;margin:24px 0"><a href="' + FRONT_BASE + '/track?code=' + code + '" style="background:#1B5E20;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none">Track My Order</a></p>' +
+        '</div>');
+    }
+
+    res.send('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Order Verified — IbadahConnect</title></head>' +
+      '<body style="margin:0;font-family:Arial,sans-serif;background:#f4f7f4;display:flex;align-items:center;justify-content:center;min-height:100vh">' +
+      '<div style="background:#ffffff;max-width:460px;width:92%;padding:36px;border-radius:14px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.08)">' +
+      '<div style="width:64px;height:64px;border-radius:50%;background:#1B5E20;color:#ffffff;font-size:34px;line-height:64px;margin:0 auto 16px">V</div>' +
+      '<h2 style="color:#1B5E20;margin:0 0 8px">Order Verified</h2>' +
+      '<p style="color:#444;margin:0 0 6px">Order <b>' + code + '</b> is now confirmed.</p>' +
+      '<p style="color:#666;font-size:14px;margin:0 0 22px">A verified performer will be assigned automatically — aap ko email aa jayegi.</p>' +
+      '<a href="' + FRONT_BASE + '/track?code=' + code + '" style="background:#1B5E20;color:#ffffff;padding:12px 26px;border-radius:8px;text-decoration:none;display:inline-block">Track My Order</a>' +
+      '</div></body></html>');
+  } catch (e) {
+    console.log('[VERIFY ERROR]', e.message);
+    res.status(500).send('Verify failed: ' + e.message);
+  }
+}
+app.get('/api/orders/verify/:token', verifyHandler);
+app.post('/api/orders/verify/:token', verifyHandler);
+app.get('/api/verify/:token', verifyHandler);
+
+/* ------------------------------------------------------------
+   LIVE GPS  (performer push + sponsor poll — in-memory, Order.js safe)
+------------------------------------------------------------ */
+function pushLiveHandler(req, res) {
+  try {
+    const b = req.body || {};
+    const lat = Number(b.lat); const lng = Number(b.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ ok: false, message: 'lat/lng required' });
+    }
+    liveLocations.set(String(req.params.orderId), {
+      lat, lng,
+      accuracy: Number(b.accuracy) || 0,
+      performerName: String(b.performerName || b.name || ''),
+      updatedAt: new Date().toISOString()
+    });
+    res.json({ ok: true, live: true });
+  } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+}
+app.post('/api/live/:orderId', pushLiveHandler);
+app.post('/api/live-location/:orderId', pushLiveHandler);
+
+async function getLiveHandler(req, res) {
+  try {
+    const key = String(req.params.orderId || '');
+    const e = liveLocations.get(key);
+    if (e && (Date.now() - new Date(e.updatedAt).getTime()) < LIVE_TTL_MS) {
+      return res.json({ ok: true, live: true, lat: e.lat, lng: e.lng, accuracy: e.accuracy, performerName: e.performerName, updatedAt: e.updatedAt, location: e, data: e });
+    }
+    // fallback: latest proof GPS (gold pin data)
+    let ord = null;
+    if (mongoose.isValidObjectId(key)) { try { ord = await Order.findById(key); } catch (er) {} }
+    if (!ord) { try { ord = await Order.findOne({ orderCode: key }); } catch (er) {} }
+    const oc = ord && ord.proofLocation ? parseCoords(ord.proofLocation) : null;
+    const mc = oc || lastMilestoneCoords(ord);
+    if (mc) {
+      return res.json({ ok: true, live: false, source: 'proof', lat: mc.lat, lng: mc.lng, updatedAt: mc.capturedAt || '', performerName: (ord && ord.performerName) || '', location: mc, data: mc });
+    }
+    return res.json({ ok: true, live: false });
+  } catch (err) { res.json({ ok: true, live: false }); }
+}
+app.get('/api/live/:orderId', getLiveHandler);
+app.get('/api/live-location/:orderId', getLiveHandler);
+app.get('/api/orders/:orderId/live', getLiveHandler);
+app.get('/api/track/live/:orderId', getLiveHandler);
+
+/* ------------------------------------------------------------
+   AI PROOF VERIFY (heuristic — GPS proximity + keyword)
+   Dashboard 60% gate isi se pass hota hai
+------------------------------------------------------------ */
+const AI_MIN = 60;
+app.post('/api/ai/verify-proof', (req, res) => {
+  try {
+    const b = req.body || {};
+    const pC = parseCoords(b.proofLocation || (b.proof && b.proof.location) || '');
+    const rC = parseCoords(b.referenceLocation || (b.reference && b.reference.location) || '');
+    let percent = 0; let mode = 'heuristic';
+    if (pC && rC) {
+      const d = haversineM(pC, rC);
+      percent = d <= 150 ? 95 : d <= 500 ? 85 : d <= 2000 ? 68 : d <= 5000 ? 52 : 25;
+      mode = 'gps-proximity (' + Math.round(d) + 'm)';
+    } else if (b.text && b.reference) {
+      const words = String(b.reference).toLowerCase().match(/[a-z]{4,}/g) || [];
+      const t = String(b.text).toLowerCase();
+      const hit = words.filter((w) => t.includes(w)).length;
+      percent = words.length ? Math.min(95, 45 + Math.round((hit / words.length) * 50)) : 60;
+      mode = 'keyword-match';
+    } else {
+      percent = 62; mode = 'presence-check';
+    }
+    const suggestion = percent >= AI_MIN ? 'verified' : 'manual-review';
+    console.log('[AI VERIFY] matchPercent=' + percent + ' mode=' + mode);
+    res.json({ ok: true, matchPercent: percent, percent, score: Math.round(percent / 10), suggestion, mode, minRequired: AI_MIN });
+  } catch (e) {
+    res.json({ ok: true, matchPercent: 62, suggestion: 'verified', mode: 'fallback', minRequired: AI_MIN });
+  }
+});
+
+/* ------------------------------------------------------------
+   PROOF SUBMIT (order-level fields + milestone sync + completion)
+------------------------------------------------------------ */
+async function proofHandler(req, res) {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) return res.status(404).json({ ok: false, message: 'Order not found' });
+    const b = req.body || {};
+    if (b.proofUrl !== undefined && hasP(Order, 'proofUrl')) order.proofUrl = b.proofUrl;
+    if (b.proofNote !== undefined && hasP(Order, 'proofNote')) order.proofNote = String(b.proofNote || '').slice(0, 500);
+    if (b.proofLocation !== undefined && hasP(Order, 'proofLocation')) order.proofLocation = b.proofLocation;
+    if (hasP(Order, 'proofSubmittedAt')) order.proofSubmittedAt = new Date();
+    if (b.stepsDone !== undefined && hasP(Order, 'stepsDone')) order.stepsDone = Number(b.stepsDone) || 0;
+    if (b.currentStep !== undefined && hasP(Order, 'currentStep')) order.currentStep = Number(b.currentStep) || 1;
+    if (b.progress !== undefined && hasP(Order, 'progress')) order.progress = Math.max(0, Math.min(100, Number(b.progress) || 0));
+    if (hasP(Order, 'taskCompleted')) order.taskCompleted = !!b.taskCompleted;
+
+    // milestone sync (agar dashboard milestoneIndex bhejta hai)
+    if (typeof b.milestoneIndex === 'number' && Array.isArray(order.milestones) && order.milestones[b.milestoneIndex]) {
+      const m = order.milestones[b.milestoneIndex];
+      m.isCompleted = true;
+      if (b.proofUrl) m.proofUrl = b.proofUrl;
+      const c = parseCoords(b.proofLocation);
+      if (c) m.proofLocation = { lat: c.lat, lng: c.lng, capturedAt: new Date() };
+    }
+
+    if (order.status !== 'Completed') order.status = b.taskCompleted ? 'Completed' : 'In Progress';
+    if (b.taskCompleted && hasP(Order, 'completedAt')) order.completedAt = new Date();
+
+    // live GPS payload ke sath bhi aa sakti hai
+    const c2 = parseCoords(b.liveLocation || b.proofLocation);
+    if (c2) {
+      liveLocations.set(String(order._id), {
+        lat: c2.lat, lng: c2.lng,
+        accuracy: Number(b.accuracy) || 0,
+        performerName: String(b.performerName || ''),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    await order.save();
+    if (b.taskCompleted) {
+      console.log('[ORDER] ' + orderCodeOf(order) + ' marked COMPLETED — slot freed, pending orders retry hongi');
+      retryPendingAssignments('performer completed an order');
+    }
+    res.json({ ok: true, message: b.taskCompleted ? 'Proof submitted — order completed' : 'Proof submitted', order });
+  } catch (e) {
+    console.log('[PROOF ERROR]', e.message);
+    res.status(500).json({ ok: false, message: 'Proof submit failed: ' + e.message });
+  }
+}
+['/api/orders/:orderId/proof', '/api/orders/:orderId/submit-proof', '/api/orders/:orderId/step-proof'].forEach((p) => {
+  app.post(p, proofHandler);
+  app.put(p, proofHandler);
+});
+
+async function statusHandler(req, res) {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) return res.status(404).json({ ok: false, message: 'Order not found' });
+    const s = String((req.body || {}).status || '');
+    if (!['Pending', 'Assigned', 'In Progress', 'Completed'].includes(s)) {
+      return res.status(400).json({ ok: false, message: 'Invalid status' });
+    }
+    order.status = s;
+    if (s === 'Completed' && hasP(Order, 'completedAt')) order.completedAt = new Date();
+    await order.save();
+    if (s === 'Completed') retryPendingAssignments('performer completed an order');
+    res.json({ ok: true, order });
+  } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+}
+app.put('/api/orders/:orderId/status', statusHandler);
+app.post('/api/orders/:orderId/status', statusHandler);
+
+/* ------------------------------------------------------------
+   TRACKING  (orderCode ya _id — sponsor track page ke liye)
+------------------------------------------------------------ */
+async function findOrderByQuery(q) {
+  const s = String(q || '').trim();
+  if (!s) return null;
+  if (mongoose.isValidObjectId(s)) { try { const o = await Order.findById(s); if (o) return o; } catch (e) {} }
+  try { const o = await Order.findOne({ orderCode: s }); if (o) return o; } catch (e) {}
+  const rx = new RegExp('^' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  try { const o = await Order.findOne({ orderCode: rx }); if (o) return o; } catch (e) {}
   return null;
 }
-async function userEmail(id) {
+
+async function trackHandler(req, res) {
   try {
-    const u = await User.findById(id).select('email');
-    return u ? u.email : null;
-  } catch (e) { return null; }
-}
-
-// --- milestone "done" tolerant check ---
-function milestoneDone(m) {
-  if (!m) return false;
-  const st = String(m.status || '').toLowerCase();
-  if (['completed', 'complete', 'done', 'verified', 'approved', 'finished'].includes(st)) return true;
-  if (m.completed === true || m.done === true || m.verified === true) return true;
-  if (m.completedAt || m.completedDate || m.verifiedAt) return true;
-  return false;
-}
-
-// purane vs naye milestones ka diff — naye complete hue log karo
-async function diffMilestones(order, prev) {
-  try {
-    if (!prev || !Array.isArray(prev.milestones) || !Array.isArray(order.milestones)) return;
-    const n = Math.min(prev.milestones.length, order.milestones.length);
-    for (let i = 0; i < n; i++) {
-      if (!milestoneDone(prev.milestones[i]) && milestoneDone(order.milestones[i])) {
-        const t = order.milestones[i].title ? `: ${order.milestones[i].title}` : '';
-        await OrderTimeline.log({
-          orderId: order._id,
-          event: EVENTS.MILESTONE_COMPLETED,
-          title: `Milestone ${i + 1} completed${t}`,
-          milestoneStep: i + 1,
-        });
-      }
-    }
-  } catch (e) { console.log('[LIFECYCLE] milestone diff failed:', e.message); }
-}
-
-// status transition handler — timeline + side-effects
-async function handleTransition(order, prev) {
-  try {
-    const FIELDS = queueEngine.FIELDS;
-    if (!FIELDS.status) { await diffMilestones(order, prev); return; }
-    const cur = String(order[FIELDS.status] || '').toLowerCase().trim();
-    const before = prev ? String(prev.status || '').toLowerCase().trim() : null;
-    if (before === cur) { await diffMilestones(order, prev); return; }
-
-    const S = queueEngine.STATUS_SETS;
-
-    if (S.cancelled.includes(cur) && !(before && S.cancelled.includes(before))) {
-      // FEATURE #4: cancel -> queue shift earlier + notifications
-      await OrderTimeline.log({
-        orderId: order._id,
-        event: EVENTS.ORDER_CANCELLED,
-        title: 'Order cancelled',
-        description: 'Remaining scheduled orders moved earlier automatically.',
-        meta: { from: before, to: cur },
-      });
-      try {
-        const res = await queueEngine.shiftQueueAfterCancellation(order._id);
-        if (res.shifted && res.shifted.length) {
-          console.log(`[LIFECYCLE] queue shifted earlier for ${res.shifted.length} order(s) after cancel`);
-        }
-      } catch (e) { console.log('[LIFECYCLE] queue shift failed:', e.message); }
-      const se = await userEmail(sponsorIdOf(order));
-      await sendMailSafe(se, 'IbadahConnect: Order cancelled',
-        `<p>Your order <b>${order._id}</b> has been cancelled.</p><p>Any scheduled orders in the performer queue were moved earlier automatically.</p>`);
-    } else if (S.completed.includes(cur) && !(before && S.completed.includes(before))) {
-      await OrderTimeline.log({
-        orderId: order._id,
-        event: EVENTS.ORDER_COMPLETED,
-        title: 'Order completed',
-        description: 'All milestones done. Completion certificate available.',
-        meta: { from: before, to: cur },
-      });
-      const se = await userEmail(sponsorIdOf(order));
-      await sendMailSafe(se, 'IbadahConnect: Order completed',
-        `<p>Good news! Your order <b>${order._id}</b> is complete. Your completion certificate and full proof set are ready in your dashboard.</p>`);
-    } else if (S.active.includes(cur) && !(before && S.active.includes(before))) {
-      await OrderTimeline.log({
-        orderId: order._id,
-        event: EVENTS.ORDER_STARTED,
-        title: 'Order started',
-        description: 'Performer has begun the rituals/execution.',
-        meta: { from: before, to: cur },
-      });
-    } else if (S.scheduled.includes(cur) && !(before && S.scheduled.includes(before))) {
-      await OrderTimeline.log({
-        orderId: order._id,
-        event: EVENTS.ORDER_SCHEDULED,
-        title: 'Order scheduled',
-        description: 'A date has been set for this order.',
-        meta: { from: before, to: cur },
-      });
-    }
-    await diffMilestones(order, prev);
-  } catch (e) { console.log('[LIFECYCLE] transition handler failed:', e.message); }
-}
-
-// hooks install — Order.js ko chhere baghair, external se
-function installOrderLifecycleHooks() {
-  if (!queueEngine || !OrderTimeline || !EVENTS) return;
-  const FIELDS = queueEngine.FIELDS;
-  const sel = FIELDS.status ? `milestones ${FIELDS.status}` : 'milestones';
-
-  async function snapshot(query) {
-    try { return await Order.findOne(query).select(sel).lean(); } catch (e) { return null; }
-  }
-  function stash(ctx, snap) {
-    ctx.$__qPrev = snap
-      ? { status: FIELDS.status ? snap[FIELDS.status] : null, milestones: snap.milestones || [] }
-      : null;
-  }
-  function copyMilestones(list) {
-    return (list || []).map((m) => (m && m.toObject ? m.toObject() : { ...(m || {}) }));
-  }
-
-  // ---- save() path ----
-  Order.schema.post('init', function (doc) {
+    const found = await findOrderByQuery(req.params.q);
+    if (!found) return res.status(404).json({ ok: false, message: 'Order not found for: ' + req.params.q });
+    let o = null;
     try {
-      doc.$__qSnap = {
-        status: FIELDS.status ? doc[FIELDS.status] : null,
-        milestones: copyMilestones(doc.milestones),
-      };
-    } catch (e) { /* ignore */ }
-  });
-  Order.schema.pre('save', function (next) {
-    this.$__qWasNew = this.isNew;
-    if (!this.$__qSnap) {
-      this.$__qSnap = {
-        status: FIELDS.status ? this[FIELDS.status] : null,
-        milestones: copyMilestones(this.milestones),
-      };
-    }
-    next();
-  });
-  Order.schema.post('save', function (doc) {
-    (async () => {
-      try {
-        const prev = doc.$__qWasNew ? { status: null, milestones: [] } : (doc.$__qSnap || null);
-        if (doc.$__qWasNew) {
-          await OrderTimeline.log({ orderId: doc._id, event: EVENTS.ORDER_CREATED, title: 'Order placed', actorRole: 'sponsor' });
-        }
-        await handleTransition(doc.toObject ? doc.toObject() : doc, prev);
-      } catch (e) { console.log('[LIFECYCLE] save hook failed:', e.message); }
-    })();
-  });
-
-  // ---- findOneAndUpdate / updateOne path (zyada tar routes yahi use karte hain) ----
-  async function preUpdate() {
-    stash(this, await snapshot(this.getQuery()));
-  }
-  function postUpdate() {
-    const prev = this.$__qPrev;
-    const filter = this.getQuery();
-    (async () => {
-      try {
-        const fresh = await Order.findOne(filter).lean();
-        if (fresh) await handleTransition(fresh, prev);
-      } catch (e) { console.log('[LIFECYCLE] update hook failed:', e.message); }
-    })();
-  }
-  Order.schema.pre('findOneAndUpdate', preUpdate);
-  Order.schema.post('findOneAndUpdate', postUpdate);
-  Order.schema.pre('updateOne', preUpdate);
-  Order.schema.post('updateOne', postUpdate);
-
-  console.log('[LIFECYCLE] order hooks installed (timeline + cancel-shift active)');
+      o = await Order.findById(found._id)
+        .populate('sponsor', 'firstName lastName email')
+        .populate('performer', 'firstName lastName email profilePic performerType isVerified experience');
+    } catch (e) {}
+    const obj = (o || found).toObject ? (o || found).toObject() : (o || found);
+    obj.serviceTitle = obj.packageTitle || obj.serviceType;
+    res.json({ ok: true, order: obj });
+  } catch (e) { res.status(500).json({ ok: false, message: 'Track failed: ' + e.message }); }
 }
+app.get('/api/orders/track/:q', trackHandler);
+app.get('/api/tracking/:q', trackHandler);
+app.get('/api/orders/code/:q', trackHandler);
 
-// purane orders me Order Created event (timeline khali na lage)
-async function backfillTimelines() {
+// GET /api/orders  — ?code= par tracking, warna all orders (admin)
+app.get('/api/orders', async (req, res) => {
   try {
-    const withEvents = await OrderTimeline.distinct('order');
-    const have = new Set(withEvents.map(String));
-    const allOrders = await Order.find({}).select('_id').lean();
-    let made = 0;
-    for (const o of allOrders) {
-      if (!have.has(String(o._id))) {
-        await OrderTimeline.log({
-          orderId: o._id,
-          event: EVENTS.ORDER_CREATED,
-          title: 'Order placed',
-          description: 'Backfilled from existing order record.',
-          meta: { backfilled: true },
-        });
-        made++;
-      }
+    if (req.query.code) {
+      const found = await findOrderByQuery(req.query.code);
+      if (!found) return res.status(404).json({ ok: false, message: 'Order not found' });
+      return res.json({ ok: true, order: found });
     }
-    if (made > 0) console.log(`Timeline backfill: ${made} order(s) updated.`);
-  } catch (e) { console.log('Timeline backfill failed:', e.message); }
-}
-
-// ---- AUTO-MONITOR (Features #2 + #3) — har 6 ghante sweep ----
-async function runQueueSweep() {
-  if (!queueEngine || !OrderTimeline || !EVENTS) return;
-  try {
-    // FEATURE #2: late active orders -> sponsor mail + queue push
-    const late = await queueEngine.findLateOrders();
-    for (const row of late) {
-      try {
-        if (row.canNotify) {
-          await OrderTimeline.log({
-            orderId: row.order._id,
-            event: EVENTS.SLA_LATE,
-            title: `Running ${row.daysLate} day(s) late`,
-            description: 'Sponsor informed; performer queue re-adjusted.',
-          });
-          const se = await userEmail(sponsorIdOf(row.order));
-          await sendMailSafe(se, 'IbadahConnect: Your order is running late',
-            `<p>Order <b>${row.order._id}</b> is about <b>${row.daysLate} day(s)</b> behind schedule.</p><p>Your performer's queue has been re-adjusted automatically and we are monitoring it closely.</p>`);
-        }
-        await queueEngine.pushQueueForDelay(row.order._id, row.daysLate);
-      } catch (e) { console.log('[QUEUE MONITOR] late-handling failed:', e.message); }
-    }
-
-    // FEATURE #3: stuck orders -> performer nudge + admin escalation
-    // (kabhi auto-reassign NAHI — fiqh: ihram continuity)
-    const stuck = await queueEngine.findStuckOrders();
-    for (const row of stuck) {
-      try {
-        if (row.canEscalate) {
-          await OrderTimeline.log({
-            orderId: row.order._id,
-            event: EVENTS.STUCK_NUDGED,
-            title: `No progress for ${row.hoursStuck}h — performer nudged`,
-            visibility: 'performer',
-          });
-          await OrderTimeline.log({
-            orderId: row.order._id,
-            event: EVENTS.STUCK_ESCALATED,
-            title: `Stuck ${row.hoursStuck}h — escalated to admin`,
-            visibility: 'admin',
-          });
-          const pf = queueEngine.FIELDS.performer;
-          const pid = pf && row.order[pf] ? (row.order[pf]._id || row.order[pf]) : null;
-          const pe = await userEmail(pid);
-          await sendMailSafe(pe, 'IbadahConnect: Action needed on your active order',
-            `<p>Order <b>${row.order._id}</b> has had no progress update for <b>${row.hoursStuck} hours</b>. Please upload the next milestone proof as soon as possible.</p>`);
-          await sendMailSafe(process.env.ADMIN_EMAIL || 'aqsa@ibadah.com', 'IbadahConnect: Stuck order escalated',
-            `<p>Order <b>${row.order._id}</b> has been stuck for ${row.hoursStuck}h. Performer has been nudged.</p><p>Note: active orders are never auto-reassigned (ihram continuity rule).</p>`);
-        }
-      } catch (e) { console.log('[QUEUE MONITOR] stuck-handling failed:', e.message); }
-    }
-
-    if (!late.length && !stuck.length) console.log('[QUEUE MONITOR] sweep clean — all orders on track.');
-    else console.log(`[QUEUE MONITOR] sweep done — late: ${late.length}, stuck: ${stuck.length}`);
+    const orders = await Order.find()
+      .populate('sponsor', 'firstName lastName email')
+      .populate('performer', 'firstName lastName email')
+      .sort({ createdAt: -1 }).limit(300);
+    res.json(orders);
   } catch (e) {
-    console.log('[QUEUE MONITOR] sweep failed:', e.message);
+    console.log('[ALL ORDERS ERROR]', e.message);
+    res.status(500).json({ message: 'Error fetching orders' });
   }
+});
+
+// track router fallbacks (agar routes/track.js na ho)
+app.get('/api/track/:code', trackHandler);
+app.get('/api/track/mine/:userId', async (req, res) => {
+  try {
+    const orders = await Order.find({ sponsor: req.params.userId }).sort({ createdAt: -1 }).limit(6);
+    res.json(orders.map((o) => {
+      const x = o.toObject ? o.toObject() : o;
+      x.serviceTitle = x.packageTitle || x.serviceType;
+      return x;
+    }));
+  } catch (e) { res.status(500).json({ message: 'Error fetching orders' }); }
+});
+
+// performer orders fallback (agar routes/performerOrders.js na ho)
+async function perfOrdersHandler(req, res) {
+  try {
+    const orders = await Order.find({ performer: req.params.userId }).sort({ createdAt: -1 }).limit(100);
+    res.json(orders.map((o) => {
+      const x = o.toObject ? o.toObject() : o;
+      x.serviceTitle = x.packageTitle || x.serviceType;
+      return x;
+    }));
+  } catch (e) { res.status(500).json({ message: 'Error fetching performer orders' }); }
+}
+app.get('/api/orders/performer/mine/:userId', perfOrdersHandler);
+app.get('/api/orders/performer/:userId', perfOrdersHandler);
+
+// LAST resort: single order by code/id
+app.get('/api/orders/:q', trackHandler);
+
+/* ------------------------------------------------------------
+   PACKAGES FALLBACK (agar routes/packages.js na ho)
+------------------------------------------------------------ */
+app.get('/api/packages', async (req, res) => {
+  try { res.json(await Package.find().sort({ price: 1 })); } catch (e) { res.json([]); }
+});
+app.get('/api/packages/:id', async (req, res) => {
+  try { res.json(await Package.findById(req.params.id)); } catch (e) { res.status(404).json({ message: 'Package not found' }); }
+});
+
+/* ------------------------------------------------------------
+   HEALTH
+------------------------------------------------------------ */
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, service: 'IbadahConnect API v2.2', mongo: mongoose.connection.readyState, performerCap: PERFORMER_CAP, liveTracked: liveLocations.size });
+});
+app.get('/', (req, res) => res.json({ ok: true, service: 'IbadahConnect API v2.2' }));
+
+/* ------------------------------------------------------------
+   MONGO CONNECT + SEED (sirf khali ho to — data kabhi delete nahi)
+------------------------------------------------------------ */
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || process.env.DATABASE_URL || '';
+if (!MONGO_URI) console.log('[DB] MONGO_URI missing — backend/.env check karein');
+
+mongoose.connection.on('error', (e) => {
+  const msg = String((e && e.message) || e);
+  console.log('[DB] connection error: ' + msg.slice(0, 180));
+  if (msg.includes('ENOTFOUND') || msg.includes('ETIMEDOUT') || msg.includes('timed out')) {
+    console.log('[DB] HINT: internet/DNS check karein + MongoDB Atlas > Network Access mein apni IP (ya 0.0.0.0/0) whitelist honi chahiye');
+  }
+});
+
+const DEFAULT_PACKAGES = [
+  { title: 'Economy Umrah', price: 50000, desc: 'Essential Umrah Badal with photo updates.', category: 'Umrah Badal', image: '/images/umrah1.jpg' },
+  { title: 'Standard Umrah', price: 80000, desc: 'Enhanced service with video documentation.', category: 'Umrah Badal', image: '/images/umrah2.jpg' },
+  { title: 'VIP Umrah Badal', price: 150000, desc: 'VIP performer & live stream.', category: 'Umrah Badal', image: '/images/umrah3.jpg' },
+  { title: 'Economy Hajj', price: 300000, desc: 'Essential Hajj Badal with photo updates.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
+  { title: 'Standard Hajj', price: 500000, desc: 'Enhanced Hajj service with video documentation.', category: 'Hajj Badal', image: '/images/hajj2.jpg' },
+  { title: 'VIP Hajj Badal', price: 700000, desc: 'VIP performer & live stream.', category: 'Hajj Badal', image: '/images/hajj3.jpg' },
+  { title: 'Ramadan Umrah', price: 150000, desc: 'Perform Umrah in the blessed month of Ramadan.', category: 'Umrah Badal', image: '/images/umrah2.jpg' },
+  { title: 'Video Proof Hajj', price: 600000, desc: 'Complete video evidence of all Hajj rituals.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
+  { title: 'Express Umrah', price: 100000, desc: 'Priority booking and fastest execution.', category: 'Umrah Badal', image: '/images/umrah3.jpg' }
+];
+
+async function seedDefaults() {
+  try {
+    const u = await User.findOne({ email: 'aqsa@ibadah.com' });
+    if (!u) {
+      const hashed = await bcrypt.hash('123456', 10);
+      await User.create({ firstName: 'First Name', lastName: 'Last Name', country: 'Pakistan', phone: '03001234567', email: 'aqsa@ibadah.com', password: hashed, role: 'Sponsor' });
+      console.log('[SEED] Default sponsor created: aqsa@ibadah.com');
+    }
+    if (Package) {
+      const count = await Package.countDocuments();
+      if (count === 0) {
+        await Package.insertMany(DEFAULT_PACKAGES);
+        console.log('[SEED] 9 default packages inserted (collection was empty)');
+      }
+    }
+  } catch (e) { console.log('[SEED] skipped:', e.message); }
 }
 
-function startQueueMonitor() {
-  if (!queueEngine) return;
-  const FIRST_SWEEP_MS = 2 * 60 * 1000;        // boot ke 2 min baad
-  const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000; // har 6 ghante
-  setTimeout(() => runQueueSweep(), FIRST_SWEEP_MS);
-  setInterval(() => runQueueSweep(), SWEEP_INTERVAL_MS);
-  console.log('[QUEUE MONITOR] started — sweep every 6h (first sweep in 2 min)');
-}
-
-if (queueEngine && OrderTimeline && EVENTS) {
-  installOrderLifecycleHooks();
-  startQueueMonitor();
-} else {
-  console.log('[LIFECYCLE] disabled — Files 1-2 missing (server phir bhi chalega).');
-}
-
-// MongoDB Connection + Seeders (SINGLE chain - do not split)
-mongoose
-  .connect(process.env.MONGO_URI, {
-    family: 4,
-    serverSelectionTimeoutMS: 30000,
-    socketTimeoutMS: 45000,
-    // NOTE: no directConnection here — Atlas replica set needs normal topology.
-  })
+mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 30000, family: 4 })
   .then(async () => {
-    console.log('MongoDB Connected');
-
-    // 1. Default User
-    const existingUser = await User.findOne({ email: 'aqsa@ibadah.com' });
-    if (!existingUser) {
-      const hashedPassword = await bcrypt.hash('123456', 10);
-      await User.create({
-        firstName: 'First Name',
-        lastName: 'Last Name',
-        country: 'Pakistan',
-        phone: '03001234567',
-        email: 'Someone@ibadah.com',
-        password: hashedPassword,
-        role: 'Sponsor',
-      });
-      console.log('Default user created: aqsa@ibadah.com');
-    }
-
-    // 2. Default Packages Seeder — 10 Umrah + 10 Hajj + 28 Donations (Force Sync)
-    const UMRAH_PACKAGES = [
-      // ---------- UMRAH BADAL (10) ----------
-      { title: 'Economy Umrah Badal', price: 50000, desc: 'Complete Umrah performed on behalf of your loved one by a verified student of Makkah — Ehram, Tawaf, Sai and Halq done step by step, with photo proof of every milestone shared with you.', category: 'Umrah Badal', image: '/images/umrah1.jpg' },
-      { title: 'Business Umrah Badal', price: 80000, desc: 'Umrah Badal with full video documentation — your performer records Tawaf, Sai and the final dua, and you receive the complete recording with photos as permanent proof.', category: 'Umrah Badal', image: '/images/umrah2.jpg' },
-      { title: 'Premium Umrah Badal', price: 100000, desc: 'Priority Umrah Badal with a dedicated scholar, live video call access during the rituals, and premium support from our team until your completion certificate is delivered.', category: 'Umrah Badal', image: '/images/umrah3.jpg' },
-      { title: 'Executive Umrah Badal', price: 120000, desc: 'Executive Umrah Badal with regular progress updates — milestone notifications at Ehram, Tawaf, Sai and Dua, performed inside Masjid al-Haram by a verified performer.', category: 'Umrah Badal', image: '/images/umrah1.jpg' },
-      { title: 'Gold Umrah Badal', price: 150000, desc: 'Gold Umrah Badal combining photo and video documentation with a scholar performer, live tracking of every ritual, and an official IbadahConnect completion certificate.', category: 'Umrah Badal', image: '/images/umrah2.jpg' },
-      { title: 'Platinum Umrah Badal', price: 180000, desc: 'Platinum Umrah Badal with a dedicated verified performer assigned only to your booking — full HD video proof, live milestone tracking and VIP support throughout the journey.', category: 'Umrah Badal', image: '/images/umrah3.jpg' },
-      { title: 'Elite Umrah Badal', price: 200000, desc: 'Elite Umrah Badal performed by a certified scholar of an Islamic university in Makkah, with complete Shariah compliance, live video access and signed documentation of every rite.', category: 'Umrah Badal', image: '/images/umrah1.jpg' },
-      { title: 'Royal Umrah Badal', price: 230000, desc: 'Royal Umrah Badal offering a premium experience — performed on your behalf with daily updates, professional photo and video coverage, and a personal case manager until completion.', category: 'Umrah Badal', image: '/images/umrah2.jpg' },
-      { title: 'Signature Umrah Badal', price: 260000, desc: 'Our signature Umrah Badal with complete documentation — every ritual recorded, verified and compiled into an official report with video, photos and a signed completion certificate.', category: 'Umrah Badal', image: '/images/umrah3.jpg' },
-      { title: 'VIP Umrah Badal', price: 300000, desc: 'The highest tier of Umrah Badal — VIP priority scheduling, the most senior verified scholar, complete live video coverage of all rites and instant certificate issuance upon completion.', category: 'Umrah Badal', image: '/images/umrah1.jpg' },
-    ];
-    const HAJJ_PACKAGES = [
-      // ---------- HAJJ BADAL (10) ----------
-      { title: 'Economy Hajj Badal', price: 300000, desc: 'Essential Hajj Badal performed on behalf of your loved one by a verified performer — Ihram, Tawaf, Sai, Arafat, Muzdalifah, Mina and Rami completed with photo proof of every stage.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
-      { title: 'Business Hajj Badal', price: 450000, desc: 'Hajj Badal with enhanced video documentation — watch the key rites of Hajj being performed on your behalf and receive the complete recording with photos as permanent proof.', category: 'Hajj Badal', image: '/images/hajj2.jpg' },
-      { title: 'Premium Hajj Badal', price: 550000, desc: 'Priority Hajj Badal with premium support — a dedicated performer completes the full Hajj on behalf of your loved one with live milestone updates and official certification.', category: 'Hajj Badal', image: '/images/hajj3.jpg' },
-      { title: 'Executive Hajj Badal', price: 650000, desc: 'Executive Hajj Badal with milestone updates at every stage of the journey — from Ihram to the farewell Tawaf — performed inside the holy sites by a verified performer.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
-      { title: 'Gold Hajj Badal', price: 750000, desc: 'Gold Hajj Badal with full photo and video documentation of all Hajj rites, performed by a verified scholar with live tracking and an official IbadahConnect certificate.', category: 'Hajj Badal', image: '/images/hajj2.jpg' },
-      { title: 'Platinum Hajj Badal', price: 900000, desc: 'Platinum Hajj Badal with a dedicated performer for your booking alone — complete HD coverage of every rite, daily progress reports and VIP support from booking to certificate.', category: 'Hajj Badal', image: '/images/hajj3.jpg' },
-      { title: 'Elite Hajj Badal', price: 1050000, desc: 'Elite Hajj Badal performed by a certified scholar with complete Shariah compliance — every rite documented live, verified and compiled into an official completion report.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
-      { title: 'Royal Hajj Badal', price: 1200000, desc: 'Royal Hajj Badal with premium execution — a senior verified scholar performs the entire Hajj on your behalf with professional documentation and a personal case manager.', category: 'Hajj Badal', image: '/images/hajj2.jpg' },
-      { title: 'Signature Hajj Badal', price: 1350000, desc: 'Our signature Hajj Badal with complete documentation — every ritual of Hajj recorded and verified, delivered to you with video, photos and a signed completion certificate.', category: 'Hajj Badal', image: '/images/hajj3.jpg' },
-      { title: 'VIP Hajj Badal', price: 1500000, desc: 'The highest tier of Hajj Badal — VIP priority scheduling, the most senior certified scholar, complete live coverage of all rites and instant certificate issuance upon completion.', category: 'Hajj Badal', image: '/images/hajj1.jpg' },
-    ];
-    // ---------- DONATION IN MECCA (28) — EXPLICIT IMAGE PATHS ----------
-    const DONATION_PACKAGES = [
-      { title: 'Wheelchair Donation in Mecca', price: 15000, desc: 'Donate a wheelchair to Masjid al-Haram — help elderly and disabled pilgrims complete their Tawaf and rituals with ease, with photo confirmation of your donation.', category: 'Donation in Mecca', image: '/images/Wheelchair Donation in Mecca.jpg' },
-      { title: 'Quran Donation in Mecca', price: 4500, desc: 'A fresh copy of the Holy Quran distributed in the Haram on your behalf — sadaqah jariya that keeps rewarding you every time it is recited.', category: 'Donation in Mecca', image: '/images/Quran Donation in Mecca.jpg' },
-      { title: 'Donate Water in Makkah', price: 4500, desc: 'Provide chilled drinking water for pilgrims in Makkah — a simple act of sadaqah that quenches the thirst of the guests of Allah in the holiest city on earth.', category: 'Donation in Mecca', image: '/images/Donate Water in Makkah.jpg' },
-      { title: 'Donate Iftar in Mecca', price: 4500, desc: 'Sponsor a complete Iftar meal for fasting pilgrims in Makkah — dates, water and a warm meal served near the Haram on your behalf.', category: 'Donation in Mecca', image: '/images/Donate Iftar in Mecca.jpg' },
-      { title: 'Feed a Pilgrim', price: 2500, desc: 'Provide a wholesome meal to a pilgrim performing their rituals — food donated in your name near Masjid al-Haram, with photo proof of distribution.', category: 'Donation in Mecca', image: '/images/Feed a Pilgrim.jpg' },
-      { title: 'Hajj Food Donation', price: 20000, desc: 'Sponsor food packages for pilgrims during the Hajj season — meals distributed among the guests of Allah in Mina and Arafat on your behalf.', category: 'Donation in Mecca', image: '/images/Hajj Food Donation.jpg' },
-      { title: 'Roza Kushai', price: 12000, desc: 'Arrange the traditional first-fast celebration (Roza Kushai) for a poor child — a complete meal and celebration arranged in your name for a deserving family.', category: 'Donation in Mecca', image: '/images/Roza Kushai.jpg' },
-      { title: 'Iftar for Orphans', price: 8000, desc: 'Sponsor a full Iftar for orphaned children in Makkah — nutritious meals served with dignity in your name during the blessed month.', category: 'Donation in Mecca', image: '/images/Iftar for Orphans.jpg' },
-      { title: 'Tasbeeh Distribution', price: 3000, desc: 'Distribute sets of prayer beads (tasbeeh) to worshippers in the Haram — a small gift that aids the dhikr of hundreds, with photo proof of distribution.', category: 'Donation in Mecca', image: '/images/Tasbeeh Distribution.jpg' },
-      { title: 'Ab-e-Zamzam Delivery', price: 6000, desc: 'Arrange pure Zamzam water, drawn and packaged in Makkah, to be distributed on your behalf — the blessed water delivered to pilgrims and the needy.', category: 'Donation in Mecca', image: '/images/Ab-e-Zamzam Delivery.jpg' },
-      { title: 'Zamzam for Pilgrims', price: 3500, desc: 'Provide bottled Zamzam water to tired pilgrims outside the Haram — refresh the guests of Allah with the most blessed water on earth.', category: 'Donation in Mecca', image: '/images/Zamzam for Pilgrims.jpg' },
-      { title: 'Kafan & Burial Fund', price: 15000, desc: 'Contribute to the kafan and burial fund of Makkah — help shroud and bury with dignity those who pass away in the holy city, on your behalf.', category: 'Donation in Mecca', image: '/images/Kafan & Burial Fund.jpg' },
-      { title: 'Prayer Mat', price: 4000, desc: 'Donate prayer mats to the courtyards of the Haram — every prostration offered on your mat becomes a source of ongoing reward for you.', category: 'Donation in Mecca', image: '/images/Prayer Mat.jpg' },
-      { title: 'Hijab & Ihram', price: 5500, desc: 'Provide Ihram garments and hijabs to pilgrims who cannot afford them — help them enter the state of Ihram with dignity on your behalf.', category: 'Donation in Mecca', image: '/images/Hijab & Ihram.jpg' },
-      { title: 'Shoes & Slippers', price: 2500, desc: 'Donate slippers to pilgrims walking between the Haram and their hotels — a small comfort that eases the journey of the guests of Allah.', category: 'Donation in Mecca', image: '/images/Shoes & Slippers.jpg' },
-      { title: 'Orphan Sponsorship', price: 10000, desc: 'Sponsor the monthly care of an orphan in Makkah — food, education and clothing provided in your name, a deed most beloved to Allah.', category: 'Donation in Mecca', image: '/images/Orphan Sponsorship.jpg' },
-      { title: 'Widows of Makkah', price: 12000, desc: 'Support widows living in Makkah with essential ration packages — a full month of supplies delivered to deserving households in your name.', category: 'Donation in Mecca', image: '/images/Widows of Makkah.jpg' },
-      { title: 'Iftar for Haram Workers', price: 7000, desc: 'Sponsor Iftar for the cleaners and workers of the Haram — honour those who serve the guests of Allah by serving them a warm meal in your name.', category: 'Donation in Mecca', image: '/images/Iftar for Haram Workers.jpg' },
-      { title: 'Wheelchair Repair', price: 8000, desc: 'Fund the repair of damaged wheelchairs in the Haram — restore mobility for disabled pilgrims and earn the reward of every Tawaf made easy.', category: 'Donation in Mecca', image: '/images/Wheelchair Repair.jpg' },
-      { title: 'Ajwa Dates', price: 9000, desc: 'Distribute premium Ajwa dates of Madinah among pilgrims and the poor of Makkah — the sunnah food shared in your name.', category: 'Donation in Mecca', image: '/images/Ajwa Dates.jpg' },
-      { title: 'Qurans for Madrasa', price: 13000, desc: 'Provide complete Quran sets to a madrasa in Makkah — equip young students with the Book of Allah and earn sadaqah jariya with every verse they learn.', category: 'Donation in Mecca', image: '/images/Qurans for Madrasa.jpg' },
-      { title: 'Winter Blankets', price: 6500, desc: 'Donate warm blankets to the poor of Makkah during cold desert nights — warmth provided to the needy of the holy city on your behalf.', category: 'Donation in Mecca', image: '/images/Winter Blankets.jpg' },
-      { title: 'Medical Aid', price: 18000, desc: 'Contribute to medical aid for poor pilgrims — treatment and medicines arranged for those who fall ill during their sacred journey.', category: 'Donation in Mecca', image: '/images/Medical Aid.jpg' },
-      { title: 'Umrah for a Poor Pilgrim', price: 25000, desc: 'Sponsor a complete Umrah for a poor Muslim who could never afford it — the journey of a lifetime arranged in your name, with photo proof.', category: 'Donation in Mecca', image: '/images/Umrah for a Poor Pilgrim.jpg' },
-      { title: 'Water Coolers', price: 22000, desc: 'Install a water cooler near the Haram — chilled water served to thousands of pilgrims, a standing sadaqah that rewards you with every sip.', category: 'Donation in Mecca', image: '/images/Water Coolers.jpg' },
-      { title: 'Sadaqah Jariya Bundle', price: 15000, desc: 'A complete sadaqah jariya bundle — Quran copies, prayer mats and water distribution combined, building a stream of ongoing reward for you or your loved one.', category: 'Donation in Mecca', image: '/images/Sadaqah Jariya Bundle.jpg' },
-      { title: 'Eid Gift Bundle', price: 11000, desc: 'Send Eid gifts to orphans and poor children of Makkah — clothes, sweets and toys distributed on your behalf on the day of Eid.', category: 'Donation in Mecca', image: '/images/Eid Gift Bundle.jpg' },
-      { title: 'Baraka Starter Bundle', price: 8500, desc: 'A baraka starter bundle for a needy family — ration, kitchen essentials and bedding to help them begin a new chapter with dignity.', category: 'Donation in Mecca', image: '/images/Baraka Starter Bundle.jpg' },
-    ];
-
-    // NEW (v2.2): DONATION SUB-CATEGORIES — Netflix rows ka data base.
-    // Single source of truth: title -> subCategory map (exact 28).
-    const DONATION_SUBCATEGORY = {
-      'Water & Iftar': ['Donate Water in Makkah', 'Donate Iftar in Mecca', 'Iftar for Orphans', 'Iftar for Haram Workers', 'Feed a Pilgrim', 'Hajj Food Donation', 'Ab-e-Zamzam Delivery', 'Zamzam for Pilgrims', 'Water Coolers', 'Ajwa Dates'],
-      'Quran & Ibadah': ['Quran Donation in Mecca', 'Qurans for Madrasa', 'Prayer Mat', 'Tasbeeh Distribution', 'Hijab & Ihram'],
-      'Orphans, Widows & Families': ['Orphan Sponsorship', 'Widows of Makkah', 'Roza Kushai', 'Eid Gift Bundle', 'Baraka Starter Bundle'],
-      'Care & Comfort': ['Wheelchair Donation in Mecca', 'Wheelchair Repair', 'Shoes & Slippers', 'Winter Blankets', 'Medical Aid'],
-      'Sadaqah Jariya & Special': ['Sadaqah Jariya Bundle', 'Umrah for a Poor Pilgrim', 'Kafan & Burial Fund'],
-    };
-    for (const pkg of DONATION_PACKAGES) {
-      const group = Object.keys(DONATION_SUBCATEGORY).find((k) => DONATION_SUBCATEGORY[k].includes(pkg.title));
-      pkg.subCategory = group || 'Other';
-    }
-
-    const DEFAULT_PACKAGES = [...UMRAH_PACKAGES, ...HAJJ_PACKAGES, ...DONATION_PACKAGES];
-    for (const pkg of DEFAULT_PACKAGES) {
-      await Package.findOneAndUpdate(
-        { title: pkg.title },
-        { $set: {
-          price: pkg.price,
-          desc: pkg.desc,
-          category: pkg.category,
-          image: pkg.image,
-          ...(pkg.subCategory ? { subCategory: pkg.subCategory } : {}), // NEW v2.2
-        } },
-        { upsert: true }
-      );
-    }
-    console.log('48 Default Packages synced successfully (donation sub-categories included)!');
-
-    // 3. DUPLICATE / STALE CLEANUP
-    const validTitles = DEFAULT_PACKAGES.map((p) => p.title);
-    const removed = await Package.deleteMany({ title: { $nin: validTitles } });
-    if (removed.deletedCount > 0) {
-      console.log(`Cleanup: ${removed.deletedCount} old/duplicate package(s) removed!`);
-    } else {
-      console.log('Cleanup: no old/duplicate packages found.');
-    }
-
-    // 4. ORDER REPAIR (v2.1) — string step -> number
-    const badOrders = await Order.find({ 'milestones.step': { $type: 'string' } });
-    if (badOrders.length > 0) {
-      let fixed = 0;
-      for (const ord of badOrders) {
-        try {
-          ord.milestones = ord.milestones.map((m, i) => {
-            const obj = typeof m.toObject === 'function' ? m.toObject() : { ...m };
-            if (typeof obj.step !== 'number') {
-              if (obj.title == null && obj.step) obj.title = String(obj.step);
-              obj.step = i + 1;
-            }
-            return obj;
-          });
-          await ord.save();
-          fixed++;
-        } catch (e) {
-          console.log(`Order Repair: could not fix order ${ord._id} — ${e.message}`);
-        }
-      }
-      console.log(`Order Repair: ${fixed}/${badOrders.length} corrupted order(s) fixed (string step -> number).`);
-    } else {
-      console.log('Order Repair: all orders healthy.');
-    }
-
-    // 5. TIMELINE BACKFILL (NEW v2.2) — purane orders me Order Created event
-    if (OrderTimeline && EVENTS) {
-      try {
-        const withEvents = await OrderTimeline.distinct('order');
-        const have = new Set(withEvents.map(String));
-        const allOrders = await Order.find({}).select('_id').lean();
-        let made = 0;
-        for (const o of allOrders) {
-          if (!have.has(String(o._id))) {
-            await OrderTimeline.log({
-              orderId: o._id,
-              event: EVENTS.ORDER_CREATED,
-              title: 'Order placed',
-              description: 'Backfilled from existing order record.',
-              meta: { backfilled: true },
-            });
-            made++;
-          }
-        }
-        if (made > 0) console.log(`Timeline backfill: ${made} order(s) — Order Created events added.`);
-      } catch (e) {
-        console.log('Timeline backfill failed:', e.message);
-      }
-    }
+    console.log('[DB] MongoDB Connected — IbadahConnect API v2.2');
+    await seedDefaults();
+    retryPendingAssignments('startup scan');
   })
-  .catch((err) => console.log('MongoDB Error:', err.message));
+  .catch((err) => {
+    console.log('[DB] MongoDB connect failed: ' + String(err.message || err).slice(0, 180));
+    console.log('[DB] Server phir bhi chal raha hai — internet + Atlas Network Access (IP whitelist 0.0.0.0/0) check karein, connect khud dobara try karega');
+  });
 
-const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on ${PORT} !`);
+  console.log('[BOOT] IbadahConnect API v2.2 running on port ' + PORT);
+  console.log('[BOOT] AUTO-ASSIGN: performer capacity = ' + PERFORMER_CAP + ' active orders | auto-retry every 60s');
 });

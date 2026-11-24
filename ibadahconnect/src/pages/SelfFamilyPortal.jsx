@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../api';
 import toast from 'react-hot-toast';
+import { logout } from '../utils/auth';
 import {
   FaSignOutAlt, FaUserCircle, FaUsers, FaHandshake, FaBuilding, FaHourglassHalf,
   FaCheckCircle, FaUserCheck, FaExternalLinkAlt, FaInfoCircle, FaGlobe
@@ -28,12 +29,12 @@ const SelfFamilyPortal = () => {
       if (u.profilePic) setProfilePic(u.profilePic);
       localStorage.setItem('user', JSON.stringify({ ...JSON.parse(localStorage.getItem('user') || '{}'), ...u, id: user.id }));
     }).catch(() => {});
-  }, []);
+  }, [user.id]);
 
   const agencyConnect = user.agencyConnect || 'None';
 
   const handleLogout = () => {
-    localStorage.clear();
+    logout();
     navigate('/');
   };
 

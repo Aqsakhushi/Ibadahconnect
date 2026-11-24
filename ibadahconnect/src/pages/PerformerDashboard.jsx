@@ -1,5 +1,71 @@
 // ============================================================
-// IbadahConnect - PerformerDashboard.jsx  (v6.0 - FLOW STEPS)
+// IbadahConnect - PerformerDashboard.jsx  (v8.1 - CLEAN NAME MENU)
+// v8.1: the header name menu is stripped to what the user asked for —
+//   NAME + PORTAL MENU (plus Rules and Log out). Removed from the menu:
+//   the Busy toggle and the whole Profile Strength block (both now live
+//   as proper cards in the Profile & Stats tab), the colored type/agency
+//   chips and the orange request-count badge. Menu colors are neutral:
+//   active item = forest-green text on gray-50, log out stays red.
+//   The menu is w-72 with max-height + internal scroll, so it always
+//   fits the screen at 100% zoom and scrolls easily instead of being
+//   cut off. No endpoints touched, no layout changes anywhere else.
+// v8.0: pairs this portal with the delivered backend/routes/orders-v2.js
+//   (sponsor name guaranteed on every order response, real auto-assign,
+//   race-safe claims). The approved v7.6 UI skeleton is untouched:
+//   1) SPONSOR NAME: order.sponsorName (computed server-side by orders
+//      v2) is the first source the sponsor resolver trusts; the populated
+//      object and the legacy fallbacks stay as backup for older backends.
+//      "Not yet assigned" is fixed at the source, so the console hint now
+//      just points to the delivered orders-v2.js file.
+//   2) AUTO-ASSIGN AWARENESS: new-task toasts / notifications are neutral
+//      ("New task assigned") because orders v2 auto-assigns Pending
+//      requests to available performers the moment they are booked; the
+//      New Requests card explains this in one line, and the queue
+//      empty-state copy matches the real assignment behaviour.
+//   3) RACE-SAFE CLAIMS: when two performers tap Accept at the same
+//      moment, the loser still gets the server's "just taken by another
+//      performer" toast AND the list refreshes immediately, so the
+//      claimed order vanishes from New Requests at once.
+//   4) Copy fixes: booking notes come from the sponsor's form ("Note
+//      from sponsor"), and the greeting no longer claims every task is
+//      assigned by Admin. Gamification (points / levels / badges / streak
+//      / payouts) ships unchanged.
+// v7.6: rebuilt to match the approved Stitch picture 1:1 - header gets the
+//   center search box ("Search tasks...", filters new requests) + refresh icon;
+//   the Location pill becomes the mockup BANNER (toggle + text + Try again,
+//   tapping the toggle still opens the separate full-page map); task card
+//   title is serif with the gold underline; Sponsor gets VERIFIED SPONSOR
+//   badge, Recipient gets BENEFICIARY badge; progress reads "N of M completed";
+//   the RIGHT RAIL returns exactly as in the picture: Quick Actions (Start
+//   Task, Upload Proof, Chat Admin, Read Guide) + How It Works (5 numbered
+//   steps). Layout = 8/4 grid. The old inline Leaflet "Live Task Map" box is
+//   FULLY removed (component, CDN loader, pins, CSS). Log out stays inside the
+//   name menu (v7.4). Logo untouched. Endpoints untouched. Order.js untouched.
+// v7.4: the header Log out button is REMOVED. Log out is now the last item
+//   inside the performer name menu (red, sign-out icon) - header right side is
+//   only: availability dot, Live chat, Notifications, performer name menu.
+//   Indentation re-verified file-wide: 2 spaces, zero tabs, zero trailing spaces.
+// v7.3: header trimmed to the approved mockup - logo left; right side only has
+//   the availability dot, Live chat, Notifications and the performer name menu
+//   (navigation lives inside it). The search box, the refresh icon and the
+//   horizontal tab bar are removed - they were never part of the mockup.
+//   Location stays as the small on/off button that opens the live map.
+// v7.2: BOTH side rails are gone - the portal is one clean focused column.
+//   The big Location card is replaced by a single small on/off pill button;
+//   tapping it opens a SEPARATE full-page live map (OpenStreetMap embed) that
+//   pins your exact GPS point - "You are here" - with a Refresh position
+//   button. No new dependencies, no API key. Logo, theme, endpoints untouched.
+// v7.1: the left profile sidebar is gone. The performer's name + avatar now sit
+//   in the header right next to Log out; clicking it opens a dropdown with the
+//   full profile (photo, Verified badge, performer type, Busy toggle, Profile
+//   Strength). Navigation moved to a horizontal tab bar under the header.
+//   Main column widened (8/4 split). Logo, theme and endpoints untouched.
+// v7.0: restyled to the final approved HTML mockup - Plus Jakarta Sans UI text,
+// Newsreader serif display headings ("Active task", Assigned by/on/at), forest
+// green #0F4D38 + gold #C29845 palette, toggle-switch Location card, Assigned
+// by/on/at metadata row, mockup task card (gold progress bar, attribute grid,
+// gold-border reason quote, Start step 1 / Upload proof / Message admin),
+// timeline-style steps, dark-green footer. Logo untouched. All endpoints same.
 // What changed in v6.0 (same UI skeleton, same endpoints):
 //   1) PACKAGE-SPECIFIC GUIDED STEPS: Sadaqah/Donation = 4 steps
 //      (Niyyah message -> Procurement -> Distribution -> Report+Dua),
@@ -29,14 +95,13 @@
 //   6) COUNTERS: Tawaf / Tawaf al-Ziyarah (7 circuits), Sa'i (7 rounds)
 //      and Rami (7 pebbles) each get a per-circuit tap counter. The
 //      Complete button stays disabled until 7/7.
-//   7) TaskMap now pins the correct site per guided step (Miqat, Kaaba,
-//      Safa/Marwah, Mina, Arafah, Muzdalifah, Jamarat) and stays
-//      ALWAYS UNLOCKED - no payment gate anywhere in the performer flow.
+//   7) Guided steps stay pinned to their Makkah sites in the step descriptions.
 // No new dependencies. React 19 + Vite safe. Order.js untouched.
 // ============================================================
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../api';
+import { logout } from '../utils/auth';
 import toast from 'react-hot-toast';
 import {
   FaTasks, FaSignOutAlt, FaUserCircle, FaHistory, FaStar, FaRegComment, FaCog, FaWallet,
@@ -45,10 +110,10 @@ import {
   FaCheckCircle, FaHourglassHalf, FaLock, FaExternalLinkAlt, FaUserCheck, FaScroll, FaMapMarkerAlt, FaRobot,
   FaCamera, FaImage, FaKey, FaUpload, FaUsers, FaHandshake, FaBuilding,
   FaKaaba, FaShoePrints, FaCut, FaCampground, FaBullseye, FaMountain, FaMoon,
-  FaHandHoldingHeart, FaHandHoldingUsd, FaGift, FaQuran,
+  FaHandHoldingHeart, FaGift, FaQuran,
   FaIdCard, FaExclamationTriangle, FaMedal, FaChartBar, FaUniversity, FaMobileAlt,
   FaCloudSun, FaBolt, FaFire, FaInfoCircle, FaClock, FaCalendarAlt, FaCrown, FaCheckDouble, FaArrowUp, FaMoneyCheckAlt,
-  FaLocationArrow, FaEnvelopeOpenText, FaShoppingBasket, FaRoute, FaDoorOpen, FaTint, FaFileAlt
+  FaEnvelopeOpenText, FaShoppingBasket, FaRoute, FaDoorOpen, FaTint, FaFileAlt, FaChevronDown, FaArrowLeft
 } from 'react-icons/fa';
 
 // Reference pictures per guided step (web-hosted, embeddable URLs)
@@ -440,7 +505,6 @@ const pickStr = (...vals) => {
   }
   return '';
 };
-const normStep = (v) => stepText(v).toLowerCase().replace(/[^a-z]/g, '');
 const DONATION_KEYS = ['donat', 'sadaqah', 'sadqa', 'sadaka', 'gift', 'qurbani', 'zakat', 'food', 'ration', 'water', 'well', 'tree', 'blanket', 'iftar', 'bundle', 'charity', 'kifalat'];
 
 // FLOW 1 (donation) vs FLOW 2 (ibadah) — keyword detection on the
@@ -454,9 +518,11 @@ const isDonation = (o) => {
 };
 const milestoneProgress = (order) => {
   const ms = (order && order.milestones) || [];
-  const done = ms.filter(m => m && m.isCompleted).length;
+  const done = ms.filter(isMilestoneCompleted).length;
   return { done, total: ms.length, pct: ms.length ? Math.round((done / ms.length) * 100) : 0 };
 };
+const isMilestoneCompleted = (milestone) =>
+  Boolean(milestone && (milestone.isCompleted || String(milestone.status || '').toLowerCase() === 'completed'));
 // On-time check: order completed within 24h of creation (+50 pts rule)
 const onTimeCheck = (o) => {
   const t = new Date(o.updatedAt) - new Date(o.createdAt);
@@ -504,10 +570,16 @@ const taskDesc = (o) => {
   if (p && p.desc) return p.desc;
   return FLOW_DESC[flowOf(o)] || '';
 };
+// Short order code + human date (reference design: "Order # IC-1042", "Assigned by Admin — Nov 6, 2:45 PM")
+const orderCode = (o) => {
+  if (!o) return '—';
+  if (o.orderCode || o.orderNumber || o.orderId) return String(o.orderCode || o.orderNumber || o.orderId);
+  return o._id ? `IC-${String(o._id).slice(-6).toUpperCase()}` : '—';
+};
 const FLOW_CHIP = {
-  donation: { label: 'Donation Request (FLOW 1)', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-  umrah: { label: 'Umrah Badal (FLOW 2)', cls: 'bg-green-50 text-green-700 border-green-200' },
-  hajj: { label: 'Hajj Badal (FLOW 2)', cls: 'bg-teal-50 text-teal-700 border-teal-200' },
+  donation: { label: 'Donation', cls: 'bg-stone-100 text-stone-700 border-stone-200' },
+  umrah: { label: 'Umrah Badal', cls: 'bg-green-50 text-green-800 border-green-200' },
+  hajj: { label: 'Hajj Badal', cls: 'bg-teal-50 text-teal-800 border-teal-200' },
 };
 
 // ---------- GUIDED STEP LEDGER (per order, per device) ----------
@@ -532,7 +604,7 @@ const saveLedgerEntry = (orderId, entry) => {
 const stepDone = (order, steps, idx, ledger) => {
   const st = steps[idx];
   if (!st) return false;
-  const groupsDone = ((order && order.milestones) || []).filter(m => m && m.isCompleted).length;
+  const groupsDone = ((order && order.milestones) || []).filter(isMilestoneCompleted).length;
   if (groupsDone > st.msIdx) return true;
   if (st.closes) return false;
   return (ledger || []).some(e => Number(e.idx) === Number(idx));
@@ -544,11 +616,54 @@ const guidedProgress = (order) => {
   return { done, total: steps.length, pct: steps.length ? Math.round((done / steps.length) * 100) : 0 };
 };
 
+// ---------- v8.0 SPONSOR RESOLVER — the performer never sees their own name ----------
+// orders v2 (backend/routes/orders-v2.js) computes sponsorName on the SERVER
+// from the populated sponsor document and attaches it to every order
+// response, so "Sponsor: Not yet assigned" is fixed at the source. The
+// resolver below still defends older backends:
+//   1) sponsorObjOf trusts order.sponsorName first (v8.0 — server-guaranteed),
+//      then order.sponsor / order.user / order.customer / order.orderedBy
+//      (raw ObjectId strings are ignored — they are not displayable names);
+//   2) sponsorLabelOf refuses to return the logged-in performer (id OR
+//      full-name match) — the UI shows "—" instead of your own name;
+//   3) a console.warn (below, in the component) names the delivered
+//      orders-v2.js file if the backend is still the old one.
+const SPONSOR_DEBUG = true;
+const nameOfUser = (u) => (u && typeof u === 'object') ? `${pickStr(u.firstName)} ${pickStr(u.lastName)}`.trim() : '';
+const sponsorIdOf = (u) => (u && typeof u === 'object' && u._id) ? String(u._id) : (typeof u === 'string' ? u : null);
+const looksLikeObjectId = (s) => typeof s === 'string' && /^[0-9a-f]{24}$/.test(s.trim());
+const sponsorObjOf = (o) => {
+  if (!o || typeof o !== 'object') return null;
+  // v8.0: sponsorName arrives computed by orders v2 on EVERY response — trust it first.
+  if (typeof o.sponsorName === 'string' && o.sponsorName.trim() !== '' && !looksLikeObjectId(o.sponsorName)) return { firstName: o.sponsorName.trim(), lastName: '' };
+  const cands = [o.sponsor, o.user, o.customer, o.orderedBy];
+  for (const c of cands) {
+    if (!c) continue;
+    if (typeof c === 'object' && nameOfUser(c)) return c;
+    if (typeof c === 'string' && c.trim() !== '' && !looksLikeObjectId(c)) return { firstName: c.trim(), lastName: '' };
+  }
+  return null;
+};
+const sponsorLabelOf = (o, self) => {
+  const s = sponsorObjOf(o);
+  if (!s) return '';
+  const selfId = String((self && self.id) || '');
+  const sid = sponsorIdOf(s);
+  if (sid && selfId && sid === selfId) return '';
+  const name = nameOfUser(s);
+  const selfName = self ? `${pickStr(self.firstName)} ${pickStr(self.lastName)}`.trim().toLowerCase() : '';
+  if (name && selfName && name.toLowerCase() === selfName) return '';
+  return name;
+};
+
 // Default values for the message template fields (sponsor / recipient /
 // mother's name pulled from the real order data whenever available).
-const defaultMsgFields = (order, st) => {
+// v6.1: takes the logged-in performer (3rd arg) — the sponsor slots of the
+// niyyah / talbiyah / report templates are never pre-filled with the
+// performer's own name.
+const defaultMsgFields = (order, st, self) => {
   const f = {};
-  const sponsorName = (order.sponsor && typeof order.sponsor === 'object') ? `${pickStr(order.sponsor.firstName)} ${pickStr(order.sponsor.lastName)}`.trim() : '';
+  const sponsorName = sponsorLabelOf(order, self);
   const recipient = pickStr(order.recipientName);
   const mother = pickStr(order.recipientMotherName, order.motherName, order.beneficiaryMotherName);
   (st.msgFields || []).forEach((fd) => {
@@ -556,7 +671,7 @@ const defaultMsgFields = (order, st) => {
     else if (fd.key === 'beneficiary') f[fd.key] = recipient || sponsorName;
     else if (fd.key === 'soul') f[fd.key] = recipient;
     else if (fd.key === 'mother') f[fd.key] = mother;
-    else if (fd.key === 'family') f[fd.key] = pickStr(order.sponsor && order.sponsor.lastName, order.sponsor && order.sponsor.firstName, sponsorName.split(' ')[0]);
+    else if (fd.key === 'family') f[fd.key] = sponsorName ? sponsorName.split(' ').pop() : '';
     else if (fd.key === 'rel') f[fd.key] = 'ibn';
     else if (fd.key === 'delivered') f[fd.key] = taskTitle(order);
     else if (fd.key === 'place') f[fd.key] = pickStr(order.city, order.area);
@@ -610,7 +725,7 @@ function useCountUp(target, duration = 1200) {
 
 function useNow(ms = 30000) {
   const [now, setNow] = useState(() => new Date());
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), ms); return () => clearInterval(t); }, [ms]);
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), ms); return () => clearInterval(t); }, [ ms ]);
   return now;
 }
 
@@ -633,165 +748,65 @@ const LEVELS = [
 const levelOf = (pts) => { let i = 0; LEVELS.forEach((l, li) => { if (pts >= l.min) i = li; }); return i; };
 
 // ============================================================
-// ALWAYS-UNLOCKED PERFORMER MAP (pure Leaflet via CDN)
-// Same loader pattern as TrackOrder.jsx (no react-leaflet —
-// React 19 peer conflict). NO payment gate in the performer flow.
+// v6.2 PROFESSIONAL TYPE SYSTEM — one scoped style block normalizes
+// the whole portal: Inter (professional UI font), calm font weights
+// (no more extrabold-everywhere), tighter letter spacing, consistent
+// sizes/radii/shadows. No other JSX needs touching for typography.
 // ============================================================
-let leafletPromise = null;
-const loadLeaflet = () => {
-  if (typeof window !== 'undefined' && window.L) return Promise.resolve(window.L);
-  if (leafletPromise) return leafletPromise;
-  leafletPromise = new Promise((resolve, reject) => {
-    if (!document.getElementById('ibd-leaflet-css')) {
-      const link = document.createElement('link');
-      link.id = 'ibd-leaflet-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-    }
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => resolve(window.L);
-    script.onerror = () => { leafletPromise = null; reject(new Error('Leaflet failed to load')); };
-    document.body.appendChild(script);
-  });
-  return leafletPromise;
-};
-
-// Step-site pins (approximate, for orientation only). Masjid Aisha
-// (Miqat at-Taneem) 21.4677, 39.8013 — Kaaba 21.4225, 39.8262.
-const MAKKAH_SITES = {
-  miqat: { lat: 21.4677, lng: 39.8013, name: 'Miqat — Masjid Aisha (at-Taneem)', ar: 'مسجد عائشة', note: 'Ihram & Niyyah start here (~8 km from the Haram).' },
-  kaaba: { lat: 21.4225, lng: 39.8262, name: 'Masjid al-Haram — Kaaba (Tawaf)', ar: 'المسجد الحرام', note: '7 circuits around the Kaaba.' },
-  safa: { lat: 21.4213, lng: 39.8277, name: "Safa — Sa'i start (approx)", ar: 'الصفا', note: "Sa'i begins at Safa." },
-  marwah: { lat: 21.4250, lng: 39.8271, name: "Marwah — Sa'i end (approx)", ar: 'المروة', note: "Sa'i ends at Marwah." },
-  haram: { lat: 21.4225, lng: 39.8262, name: 'Masjid al-Haram', ar: 'المسجد الحرام', note: 'Halq/Taqsir and the closing Dua.' },
-  mina: { lat: 21.4133, lng: 39.8934, name: 'Mina (approx)', ar: 'منى', note: 'Day of Tarwiyah — 5 prayers in Mina.' },
-  arafah: { lat: 21.3550, lng: 39.9840, name: 'Arafat — Jabal al-Rahma (approx)', ar: 'عرفة', note: 'The wuqoof — the pillar of Hajj.' },
-  muzdalifah: { lat: 21.3866, lng: 39.9417, name: 'Muzdalifah (approx)', ar: 'مزدلفة', note: 'Open-sky night + collecting pebbles.' },
-  jamarat: { lat: 21.4130, lng: 39.8940, name: 'Jamarat al-Aqabah (approx)', ar: 'الجمار', note: 'Rami — 7 pebbles on 10 Dhul Hijjah.' },
-};
-// Map a GUIDED STEP KEY to its site pins (v6.0)
-const stepSites = (flow, stepKey) => {
-  if (flow === 'donation') return []; // no fixed site — live location only
-  const k = stepKey || '';
-  if (k === 'miqat' || k === 'hprep' || k === 'prep') return [MAKKAH_SITES.miqat];
-  if (k === 'tawaf' || k === 'tawafzy') return [MAKKAH_SITES.kaaba];
-  if (k === 'sai' || k === 'hsai') return [MAKKAH_SITES.safa, MAKKAH_SITES.marwah];
-  if (k === 'mina') return [MAKKAH_SITES.mina];
-  if (k === 'arafah') return [MAKKAH_SITES.arafah];
-  if (k === 'muzdalifah') return [MAKKAH_SITES.muzdalifah];
-  if (k === 'rami') return [MAKKAH_SITES.jamarat];
-  return [MAKKAH_SITES.haram];
-};
-const pinSvg = (fill) => `<svg width="26" height="34" viewBox="0 0 24 34" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4 0 0 5.4 0 12c0 8.6 10.2 19.8 11.4 21 .3.3.9.3 1.2 0C13.8 31.8 24 20.6 24 12 24 5.4 18.6 0 12 0z" fill="${fill}" stroke="#ffffff" stroke-width="2"/><circle cx="12" cy="12" r="4.6" fill="#ffffff"/></svg>`;
-const TASK_MAP_CSS = `
-.ibd5-map-wrap .leaflet-container { height: 100%; width: 100%; border-radius: 0.75rem; z-index: 0; background: #e5e7eb; }
-.ibd5-you { position: relative; width: 22px; height: 22px; }
-.ibd5-you .ibd5-dot { position: absolute; inset: 5px; background: #2563eb; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
-.ibd5-you .ibd5-ring { position: absolute; inset: 0; border-radius: 50%; background: rgba(37,99,235,0.35); animation: ibd5ping 1.6s ease-out infinite; }
-@keyframes ibd5ping { 0% { transform: scale(0.5); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
+const FONT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+.ibd-pro { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-variant-numeric: tabular-nums; }
+.ibd-pro button, .ibd-pro input, .ibd-pro select, .ibd-pro textarea { font-family: inherit; }
+/* v7.0 type scale — serif display headings + medium-weight UI text (mockup) */
+.ibd-pro .font-serif { font-family: 'Newsreader', Georgia, 'Times New Roman', serif; }
+.ibd-pro .font-extrabold { font-weight: 700; }
+.ibd-pro .font-bold { font-weight: 600; }
+.ibd-pro .tracking-widest { letter-spacing: 0.08em; }
+.ibd-pro .tracking-wider { letter-spacing: 0.05em; }
+.ibd-pro [class*="text-[9px]"] { font-size: 10px; }
+.ibd-pro .text-2xl { font-size: 1.375rem; line-height: 1.75rem; }
+.ibd-pro .text-3xl { font-size: 1.5rem; line-height: 2rem; }
+.ibd-pro .text-4xl { font-size: 1.875rem; line-height: 2.25rem; }
+.ibd-pro .rounded-2xl { border-radius: 0.75rem; }
+.ibd-pro .shadow-2xl { box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.22); }
+.ibd-pro .shadow-sm { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03); }
+/* v7.0 FOREST PALETTE — primary -> forest #0F4D38 (hover #0A3B2B), accent -> gold.
+   The logo keeps its own colors (inline styles) and status dots stay green/gold/red. */
+.ibd-pro [class*="text-primary/"] { color: #4E7A63; }
+.ibd-pro [class*="text-primary"]:not([class*="text-primary/"]) { color: #0F4D38; }
+.ibd-pro [class*="bg-primary/"] { background-color: #F0F5F2; }
+.ibd-pro [class*="hover:bg-primary"] { background-color: #0F4D38; }
+.ibd-pro [class*="hover:bg-primary"]:hover { background-color: #0A3B2B; }
+.ibd-pro [class*="bg-primary"]:not([class*="bg-primary/"]):not([class*="hover:"]) { background-color: #0F4D38; }
+.ibd-pro [class*="focus:border-primary"]:focus { border-color: #0F4D38; }
+.ibd-pro [class*="border-primary/"] { border-color: #D8E3DB; }
+.ibd-pro [class*="hover:border-primary"]:hover { border-color: #BFD3C5; }
+.ibd-pro [class*="border-primary"]:not([class*="border-primary/"]):not([class*="focus:"]):not([class*="hover:"]) { border-color: #0F4D38; }
+.ibd-pro [class*="text-accent"] { color: #8F6D32; }
+.ibd-pro [class*="bg-accent"]:not([class*="hover:"]) { background-color: #C29845; }
+.ibd-pro [class*="border-accent"] { border-color: #E3D9C2; }
+/* v7.0 NEUTRAL REMAP — the mockup's green-gray surfaces, borders and text */
+.ibd-pro .border-gray-100 { border-color: #EDF1ED; }
+.ibd-pro .border-gray-200 { border-color: #E3E8E3; }
+.ibd-pro .border-gray-300 { border-color: #D5DCD5; }
+.ibd-pro .bg-gray-50 { background-color: #FBFDFB; }
+.ibd-pro .bg-gray-100 { background-color: #F0F3F0; }
+.ibd-pro .bg-gray-200 { background-color: #E5EAE5; }
+.ibd-pro .text-gray-300 { color: #AEBBB2; }
+.ibd-pro .text-gray-400 { color: #8B9890; }
+.ibd-pro .text-gray-500 { color: #69786F; }
+.ibd-pro .text-gray-600 { color: #55635B; }
+.ibd-pro .text-gray-700 { color: #3F4F46; }
+.ibd-pro .text-gray-800 { color: #2A332E; }
+.ibd-pro .text-gray-900 { color: #163D2E; }
+/* pastel colored surfaces -> one soft green surface */
+.ibd-pro .bg-green-50, .ibd-pro .bg-green-100, .ibd-pro .bg-teal-50, .ibd-pro .bg-amber-50, .ibd-pro .bg-amber-100, .ibd-pro .bg-blue-50, .ibd-pro .bg-blue-100, .ibd-pro .bg-yellow-50, .ibd-pro .bg-yellow-100, .ibd-pro .bg-red-50, .ibd-pro .bg-red-100, .ibd-pro .bg-purple-50, .ibd-pro .bg-stone-100 { background-color: #F4F7F4; }
+.ibd-pro .border-green-100, .ibd-pro .border-blue-100, .ibd-pro .border-amber-100 { border-color: #E8EEE8; }
+.ibd-pro .border-green-200, .ibd-pro .border-teal-200, .ibd-pro .border-amber-200, .ibd-pro .border-blue-200, .ibd-pro .border-yellow-200, .ibd-pro .border-red-200, .ibd-pro .border-purple-200, .ibd-pro .border-stone-200 { border-color: #DCE4DC; }
+.ibd-pro .border-green-300 { border-color: #CBD8CD; }
+/* colored text -> calm graphite (status dots keep their colors) */
+.ibd-pro .text-green-700, .ibd-pro .text-green-800, .ibd-pro .text-green-600, .ibd-pro .text-teal-800, .ibd-pro .text-stone-700, .ibd-pro .text-blue-700, .ibd-pro .text-blue-600, .ibd-pro .text-blue-500, .ibd-pro .text-amber-700, .ibd-pro .text-amber-600, .ibd-pro .text-yellow-700, .ibd-pro .text-yellow-600, .ibd-pro .text-yellow-400, .ibd-pro .text-purple-700, .ibd-pro .text-purple-600, .ibd-pro .text-purple-400 { color: #3F4F46; }
 `;
-
-function TaskMap({ flow, stepName }) {
-  const mapEl = useRef(null);
-  const mapRef = useRef(null);
-  const youRef = useRef(null);
-  const accRef = useRef(null);
-  const watchRef = useRef(null);
-  const [mapState, setMapState] = useState('loading'); // loading | ready | error
-  const [geoStatus, setGeoStatus] = useState('locating'); // locating | live | denied
-  const [accM, setAccM] = useState(0);
-  const sites = useMemo(() => stepSites(flow, stepName), [flow, stepName]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setMapState('loading');
-    setGeoStatus('locating');
-    loadLeaflet().then((L) => {
-      if (cancelled || !mapEl.current || mapRef.current) return;
-      const map = L.map(mapEl.current, { scrollWheelZoom: false, attributionControl: true });
-      map.setView([21.4225, 39.8262], 12);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
-      mapRef.current = map;
-      setMapState('ready');
-      const group = L.featureGroup();
-      sites.forEach(s => {
-        L.marker([s.lat, s.lng], {
-          icon: L.divIcon({ className: '', html: pinSvg('#1B5E20'), iconSize: [26, 34], iconAnchor: [13, 34], popupAnchor: [0, -30] })
-        }).addTo(group).bindPopup(
-          `<b>${s.name}</b><br/><span style="font-size:11px;color:#6b7280">${s.note}${s.ar ? ' &middot; <span style="font-family:Amiri,serif">' + s.ar + '</span>' : ''}</span><br/><a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noreferrer" style="font-size:11px;font-weight:700;color:#1B5E20">Open Directions</a>`
-        );
-      });
-      if (sites.length) { group.addTo(map); map.fitBounds(group.getBounds().pad(0.35)); }
-      // LIVE "You are here" — same pattern as the sponsor track page
-      if (navigator.geolocation) {
-        const addYou = (pos) => {
-          if (cancelled || !mapRef.current) return;
-          const c = [pos.coords.latitude, pos.coords.longitude];
-          setAccM(Math.round(pos.coords.accuracy || 0));
-          if (!youRef.current) {
-            youRef.current = L.marker(c, {
-              icon: L.divIcon({ className: '', html: '<div class="ibd5-you"><span class="ibd5-ring"></span><span class="ibd5-dot"></span></div>', iconSize: [22, 22], iconAnchor: [11, 11] })
-            }).addTo(mapRef.current).bindPopup('You are here');
-            accRef.current = L.circle(c, { radius: pos.coords.accuracy || 60, color: '#2563eb', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.12 }).addTo(mapRef.current);
-          } else {
-            youRef.current.setLatLng(c);
-            if (accRef.current) accRef.current.setLatLng(c).setRadius(pos.coords.accuracy || 60);
-          }
-          setGeoStatus('live');
-        };
-        navigator.geolocation.getCurrentPosition(addYou, () => { if (!cancelled) setGeoStatus('denied'); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-        watchRef.current = navigator.geolocation.watchPosition(addYou, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 4000 });
-      } else {
-        setGeoStatus('denied');
-      }
-    }).catch(() => { if (!cancelled) setMapState('error'); });
-    return () => {
-      cancelled = true;
-      if (watchRef.current && navigator.geolocation) { navigator.geolocation.clearWatch(watchRef.current); watchRef.current = null; }
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-      youRef.current = null; accRef.current = null;
-    };
-  }, [flow, stepName, sites.length]);
-
-  return (
-    <div className="mt-4">
-      <style>{TASK_MAP_CSS}</style>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-          <FaMapMarkerAlt className="text-primary" /> Live Task Map — Always Unlocked for Performers
-        </p>
-        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${geoStatus === 'live' ? 'bg-blue-50 text-blue-700 border-blue-200' : geoStatus === 'denied' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-          {geoStatus === 'live' ? `You are here - live (accuracy ~${accM || 30}m)` : geoStatus === 'denied' ? 'Location permission blocked' : 'Locating you...'}
-        </span>
-      </div>
-      <div className="ibd5-map-wrap relative rounded-xl border border-gray-200 overflow-hidden shadow-sm" style={{ height: '260px' }} ref={mapEl}>
-        {mapState !== 'ready' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-10">
-            {mapState === 'loading' ? (
-              <><span className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mb-2"></span><p className="text-[11px] font-bold text-gray-400">Loading the map...</p></>
-            ) : (
-              <><FaMapMarkerAlt className="text-2xl text-gray-300 mb-1" /><p className="text-[11px] font-bold text-gray-400">Map unavailable (offline) — proofs still work.</p></>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-        {sites.length > 0 ? sites.map(s => (
-          <a key={s.name} href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
-            <FaLocationArrow className="text-[8px]" /> {s.name}
-          </a>
-        )) : (
-          <p className="text-[10px] text-gray-400">Donation task — no fixed site. Your live position is shown; every proof carries its own GPS for the sponsor.</p>
-        )}
-      </div>
-      <p className="text-[9px] text-gray-400 mt-1.5 leading-snug">
-        No payment is required to see this map — it is always unlocked in the performer portal. The sponsor sees each step proof (photo + GPS + time) on their tracking page as you submit it.
-      </p>
-    </div>
-  );
-}
 
 // Animated stat card (count-up on load)
 function CountStat({ icon: Ic, label, value, prefix = '', suffix = '', tone = 'text-gray-800', sub }) {
@@ -835,7 +850,7 @@ function BriefingCard({ prayerData, weather, queuePos, etaText, openCount }) {
   const hijri = prayerData && prayerData.hijri;
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="px-4 py-2.5 bg-gradient-to-r from-primary/10 to-accent/10 border-b border-gray-100 flex items-center gap-2">
+      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
         <FaCalendarAlt className="text-primary" />
         <p className="text-xs font-extrabold text-gray-700 uppercase tracking-wider">Today&apos;s Briefing - Makkah</p>
         {hijri && <span className="ml-auto text-[10px] font-bold text-gray-400">{hijri.day} {hijri.month ? hijri.month.en : ''} {hijri.year} AH</span>}
@@ -876,12 +891,12 @@ function BriefingCard({ prayerData, weather, queuePos, etaText, openCount }) {
         </div>
       </div>
       {hijri && hijri.month && hijri.month.number === 9 && (
-        <div className="px-4 py-2.5 bg-purple-600 text-white flex items-center gap-2">
+        <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 text-gray-700 flex items-center gap-2">
           <FaMoon /> <p className="text-xs font-bold">Ramadan Mubarak - high task volume expected. Keep your availability ON.</p>
         </div>
       )}
       {hijri && hijri.month && hijri.month.number === 12 && (
-        <div className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-white flex items-center gap-2">
+        <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 text-gray-700 flex items-center gap-2">
           <FaKaaba /> <p className="text-xs font-bold">Dhul-Hijjah season - Hajj Badal requests peak in these days.</p>
         </div>
       )}
@@ -932,7 +947,7 @@ function BadgeShelf({ badges }) {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
         {badges.map(b => (
-          <div key={b.id} className={`rounded-xl border p-3 text-center transition-all ${b.have ? 'bg-gradient-to-b from-yellow-50 to-white border-accent/40 shadow-sm' : 'bg-gray-50 border-gray-200 opacity-80'}`}>
+          <div key={b.id} className={`rounded-xl border p-3 text-center transition-all ${b.have ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
             <div className={`w-9 h-9 mx-auto rounded-full flex items-center justify-center ${b.have ? 'bg-accent text-white shadow' : 'bg-gray-200 text-gray-400'}`}>
               {b.have ? <b.icon /> : <FaLock className="text-xs" />}
             </div>
@@ -1038,52 +1053,39 @@ function StepFlow({ order, openStepModal, logTick }) {
 
   return (
     <div>
-      {/* Authentic Step Guide header */}
-      <div className="mb-4 bg-gradient-to-r from-green-50 to-yellow-50 border border-green-100 rounded-xl p-3.5 flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0"><FaQuran /></div>
-        <div className="min-w-0">
-          <p className="text-sm font-extrabold text-gray-800">{KIND_LABEL[flow]} - Authentic Step-by-Step Guide</p>
-          <p className="text-[11px] text-gray-500 leading-relaxed mt-0.5">Steps open ONE BY ONE in the correct sharai order: complete a step with proof and the next one unlocks. A completed step is locked permanently.</p>
-          <p className="text-[10px] text-gray-400 leading-relaxed mt-1">Your guided steps are grouped onto the platform&apos;s milestone template — when a group&apos;s last step completes, its proof is delivered to the sponsor&apos;s tracking page.</p>
-        </div>
+      {/* Steps header (mockup: slim heading + gold progress line) */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-lg font-bold text-[#14261C]">Steps</h3>
+        <p className="text-xs text-[#6A7870] font-medium">{doneCount} of {steps.length} complete ({pct}%)</p>
       </div>
-
-      {/* Progress Bar */}
-      <div className="mb-5">
-        <div className="flex justify-between items-center mb-2">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Progress</p>
-          <p className="text-xs font-bold text-primary">{doneCount} / {steps.length} Steps ({pct}%)</p>
-        </div>
-        <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full transition-all duration-700" style={{ width: `${pct}%` }}></div>
-        </div>
+      <div className="w-full bg-[#E5EAE5] h-1 rounded-full overflow-hidden mb-5">
+        <div className="bg-[#114634] h-full rounded-full transition-all duration-700" style={{ width: `${pct}%` }}></div>
       </div>
+      <p className="text-xs text-[#69786F] leading-relaxed mb-6">Steps open one by one in the correct sharai order — complete a step with proof and the next one unlocks. A completed step is locked permanently.</p>
 
-      <div className="space-y-3">
+      <div className="relative">
+        <div className="absolute left-[13px] top-4 bottom-8 w-[1px] bg-[#E3E8E3]" aria-hidden="true"></div>
         {steps.map((g, idx) => {
-          const Ic = g.icon || FaCheckCircle;
           const isDone = doneArr[idx];
           const isLocked = !isDone && idx > firstOpen;
           const isCurrent = !isDone && idx === firstOpen;
           const entry = (ledger || []).find(e => Number(e.idx) === Number(idx));
           const msObj = (order.milestones || [])[g.msIdx];
-          const mProofUrl = msObj && msObj.isCompleted ? msObj.proofUrl : '';
+          const mProofUrl = isMilestoneCompleted(msObj) ? msObj.proofUrl : '';
           return (
-            <div key={g.key} className={`p-3.5 rounded-xl border transition-all ${isDone ? 'bg-green-50/60 border-green-200' : isCurrent ? 'bg-white border-primary/50 shadow-sm' : isLocked ? 'bg-gray-50 border-gray-200 opacity-80' : 'bg-white border-gray-200 hover:border-primary/40 hover:shadow-sm'}`}>
-              <div className="flex gap-3">
-                {/* Distinct icon per step */}
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${isDone ? 'bg-green-500 text-white shadow-sm' : isCurrent ? 'bg-primary text-white border border-primary shadow-sm' : isLocked ? 'bg-gray-100 text-gray-300 border border-gray-200' : 'bg-primary/10 text-primary border border-primary/20'}`}>
-                  {isLocked ? <FaLock /> : isDone ? <FaCheckCircle /> : <Ic />}
-                </div>
+            <div key={g.key} className="relative flex items-start gap-3.5 pb-7 last:pb-0">
+              {/* Timeline circle (mockup: numbered, continuous line behind) */}
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ring-4 ring-white relative z-10 ${isDone ? 'bg-[#114634] text-white' : isCurrent ? 'bg-[#114634] text-white' : 'border border-[#D5DCD5] bg-white text-[#56655C]'}`}>
+                {isDone ? <FaCheck className="text-[10px]" /> : idx + 1}
+              </div>
 
-                {/* Step content */}
-                <div className="flex-1 min-w-0">
+              {/* Step content */}
+              <div className="flex-1 min-w-0 pt-0.5">
                   <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
-                    <span className="text-[9px] font-extrabold tracking-wider text-yellow-700 bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded">STEP {idx + 1} OF {steps.length}</span>
-                    <p className={`font-bold text-sm ${isDone ? 'text-green-700 line-through' : 'text-gray-800'}`}>{g.title}</p>
+                    <h4 className={`text-sm leading-snug ${isDone ? 'font-semibold text-[#18271E] line-through' : isCurrent ? 'font-semibold text-[#18271E]' : 'font-normal text-[#38463F]'}`}>{g.title}</h4>
                     {g.ar && <span className="font-amiri text-gray-400 text-sm leading-none">{g.ar}</span>}
-                    {isCurrent && <span className="text-[9px] font-extrabold text-white bg-primary px-2 py-0.5 rounded-full">CURRENT STEP</span>}
-                    {g.closes && isCurrent && <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">SENDS MILESTONE PROOF</span>}
+                    <span className={`text-xs ${isDone ? 'text-[#0E4A35] font-medium' : isCurrent ? 'text-[#5F6E65]' : 'text-[#8B9890]'}`}>{isDone ? 'Completed' : isCurrent ? 'Current step' : 'Locked'}</span>
+                    {g.closes && isCurrent && <span className="text-[10px] font-medium text-[#4C5B52] border border-[#CCD5CD] bg-[#FBFDFB] px-2 py-0.5 rounded-md">sends milestone proof</span>}
                   </div>
 
                   {/* Detailing */}
@@ -1091,7 +1093,7 @@ function StepFlow({ order, openStepModal, logTick }) {
 
                   {/* Golden Points */}
                   {g.points && g.points.length > 0 && !isLocked && (
-                    <div className="mt-2 bg-gradient-to-r from-yellow-50/80 to-transparent border-l-2 border-accent rounded-r-lg px-2.5 py-2">
+                    <div className="mt-2 bg-gray-50 border-l-2 border-gray-300 rounded-r-lg px-2.5 py-2">
                       <p className="text-[9px] font-extrabold text-yellow-700 tracking-wider flex items-center gap-1"><FaStar className="text-accent" /> GOLDEN POINTS</p>
                       <ul className="mt-1 space-y-1">
                         {g.points.map((p, pi) => (
@@ -1166,24 +1168,23 @@ function StepFlow({ order, openStepModal, logTick }) {
 
                 {/* Reference picture per step (click to enlarge) */}
                 {g.img && !isLocked && (
-                  <a href={g.img} target="_blank" rel="noreferrer" className="hidden sm:flex flex-col items-center flex-shrink-0 group w-24 md:w-28">
-                    <img src={g.img} alt={`${g.title} reference`} loading="lazy" className="w-24 h-24 md:w-28 md:h-24 object-cover rounded-xl border border-gray-200 shadow-sm group-hover:border-accent group-hover:shadow-md transition-all" />
+                  <a href={g.img} target="_blank" rel="noreferrer" className="inline-flex flex-col items-center flex-shrink-0 group w-24 md:w-28 mt-2">
+                    <img src={g.img} alt={`${g.title} reference`} loading="lazy" className="w-24 h-24 md:w-28 md:h-28 object-cover rounded-xl border border-gray-200 shadow-sm group-hover:border-accent group-hover:shadow-md transition-all" />
                     <span className="text-[8px] font-bold text-gray-400 mt-1 flex items-center gap-0.5 group-hover:text-accent transition-colors"><FaExternalLinkAlt className="text-[7px]" /> REFERENCE PIC</span>
                   </a>
                 )}
               </div>
-            </div>
           );
         })}
       </div>
 
       {/* Completion Banner */}
       {doneCount === steps.length && steps.length > 0 && (
-        <div className="mt-4 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-xl p-4 flex items-center gap-3 text-white">
-          <FaTrophy className="text-3xl" />
+        <div className="mt-6 bg-[#093527] rounded-xl p-4 flex items-center gap-3 text-white">
+          <FaTrophy className="text-2xl text-[#CBA048]" />
           <div>
-            <p className="font-extrabold">Congratulations! Task Completed!</p>
-            <p className="text-xs opacity-90">The order status is now "Completed" and the sponsor can see all your proofs.</p>
+            <p className="font-semibold">Congratulations! Task Completed!</p>
+            <p className="text-xs opacity-80">The order status is now "Completed" and the sponsor can see all your proofs.</p>
           </div>
         </div>
       )}
@@ -1198,7 +1199,7 @@ const PerformerDashboard = () => {
     LS.get('user', {}).profilePic || localStorage.getItem('performerPic') || ''
   );
   const [allOrders, setAllOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('tasks');
   const [searchQuery, setSearchQuery] = useState('');
   const now = useNow(30000); // live tick — refreshes timers, prayer countdown, "assigned X ago"
@@ -1209,9 +1210,9 @@ const PerformerDashboard = () => {
   const [proofSaving, setProofSaving] = useState(false);
 
   // v6.0 STEP PROOF state (message + multi-photo + receipt + video + AI)
-  const [msgText, setMsgText] = useState('');
-  const [msgDirty, setMsgDirty] = useState(false);
-  const [msgFields, setMsgFields] = useState({});
+  const [ msgText, setMsgText ] = useState('');
+  const [ msgDirty, setMsgDirty ] = useState(false);
+  const [ msgFields, setMsgFields ] = useState({});
   const [noteText, setNoteText] = useState('');
   const [proofPhotos, setProofPhotos] = useState([]);     // [{ url, preview }]
   const [receiptState, setReceiptState] = useState(null); // { url, preview }
@@ -1225,6 +1226,60 @@ const PerformerDashboard = () => {
   const [locStatus, setLocStatus] = useState('idle'); // idle | capturing | captured | error
   const [proofLocation, setProofLocation] = useState(null); // { lat, lng, capturedAt }
   const [showCoords, setShowCoords] = useState(false);
+
+  // ---------- PAGE LOCATION SWITCH (Location on / Location off card) ----------
+  // Reads the browser geolocation permission for this site and mirrors it on
+  // a small card at the top of the Tasks tab: green "Location on" when the
+  // browser grants it, amber "Location off" card with a Try again button when
+  // it is blocked or not granted yet (Try again fires the permission prompt).
+  const [pageGeo, setPageGeo] = useState('checking'); // checking | on | off
+  const checkPageGeo = useCallback((askIfBlocked) => {
+    if (!navigator.geolocation) { setPageGeo('off'); return; }
+    const ok = () => setPageGeo('on');
+    const bad = () => setPageGeo('off');
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'geolocation' }).then((p) => {
+        if (p.state === 'granted') {
+          navigator.geolocation.getCurrentPosition(ok, bad, { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+        } else if (askIfBlocked) {
+          navigator.geolocation.getCurrentPosition(ok, bad, { enableHighAccuracy: false, timeout: 20000, maximumAge: 0 });
+        } else {
+          setPageGeo('off'); // not granted yet -> show the off card with Try again
+        }
+      }).catch(() => {
+        navigator.geolocation.getCurrentPosition(ok, bad, { enableHighAccuracy: false, timeout: 10000, maximumAge: askIfBlocked ? 0 : 60000 });
+      });
+    } else {
+      navigator.geolocation.getCurrentPosition(ok, bad, { enableHighAccuracy: false, timeout: 10000, maximumAge: askIfBlocked ? 0 : 60000 });
+    }
+  }, []);
+  useEffect(() => { checkPageGeo(false); }, [checkPageGeo]);
+
+  // ---------- v7.2 LIVE MAP PAGE (Location button -> separate map page) ----------
+  const [ mapOpen, setMapOpen ] = useState(false);
+  const [ mapCoords, setMapCoords ] = useState(null); // { lat, lng, acc }
+  const [ mapLocating, setMapLocating ] = useState(false);
+  const [ mapError, setMapError ] = useState('');
+  const fetchMapLocation = useCallback(() => {
+    if (!navigator.geolocation) { setMapError('Your browser does not support location.'); return; }
+    setMapLocating(true); setMapError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setMapCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy || 0) });
+        setMapLocating(false);
+        setPageGeo('on');
+      },
+      (err) => {
+        setMapError(err && err.code === 1
+          ? 'Location permission is blocked. Allow location for this site from the browser address bar, then press Retry.'
+          : 'Could not read your position. Press Retry.');
+        setMapLocating(false);
+        setPageGeo('off');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, []);
+  useEffect(() => { if (mapOpen) fetchMapLocation(); }, [ mapOpen, fetchMapLocation ]);
 
   // OCR PROOF VERIFICATION state
   const [ocrStatus, setOcrStatus] = useState('idle'); // idle | checking | done | skip | error
@@ -1240,7 +1295,7 @@ const PerformerDashboard = () => {
 
   // PROOF PHOTO UPLOAD state
   const [proofUploading, setProofUploading] = useState(false);
-  const [proofPreview, setProofPreview] = useState('');
+  const [, setProofPreview] = useState('');
 
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -1253,6 +1308,7 @@ const PerformerDashboard = () => {
   const [available, setAvailable] = useState(() => LS.get('ic_available', true));
   const [notifs, setNotifs] = useState(() => { const v = LS.get('ic_notifs', []); return Array.isArray(v) ? v : []; });
   const [notifOpen, setNotifOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false); // v7.1 — header name menu (old sidebar profile)
   const [payouts, setPayouts] = useState(() => { const v = LS.get('ic_payouts', []); return Array.isArray(v) ? v : []; });
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [wForm, setWForm] = useState({ method: 'Bank Transfer', accName: '', accNo: '', amount: '' });
@@ -1281,13 +1337,13 @@ const PerformerDashboard = () => {
   const browserNotif = (title, body) => { try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body }); } catch { /* ignore */ } };
 
   // ---------- DATA HELPERS ----------
-  const performerIdOf = (o) => (o.performer ? (typeof o.performer === 'object' ? o.performer._id : o.performer) : null);
-  const isMine = (o) => performerIdOf(o) === user.id;
+  const performerIdOf = useCallback((o) => (o.performer ? (typeof o.performer === 'object' ? o.performer._id : o.performer) : null), []);
+  const isMine = useCallback((o) => performerIdOf(o) === user.id, [performerIdOf, user.id]);
 
   const fetchTasks = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await API.get('/orders/all');
+      const res = await API.get('/orders/all', { skipAuthRedirect: silent });
       setAllOrders(res.data);
     } catch (err) {
       if (!silent) toast.error('Failed to load tasks. Please check the server.');
@@ -1312,7 +1368,7 @@ const PerformerDashboard = () => {
       setProfileForm({ firstName: u.firstName || '', lastName: u.lastName || '', phone: u.phone || '', country: u.country || '', experience: u.experience || '' });
       localStorage.setItem('user', JSON.stringify({ ...JSON.parse(localStorage.getItem('user') || '{}'), ...u, id: user.id, token: undefined }));
     }).catch(() => {});
-  }, []);
+  }, [user.id]);
 
   // ---------- TODAY'S BRIEFING DATA ----------
   useEffect(() => {
@@ -1353,7 +1409,6 @@ const PerformerDashboard = () => {
   const myCompleted = allOrders.filter(o => isMine(o) && o.status === 'Completed');
   const newRequests = allOrders.filter(o => o.status === 'Pending');
   const isBusy = !!(myAssigned || myActive);
-  const activeTask = myActive || myAssigned;
   const acceptingTasks = available && !isBusy;
 
   const PRICE_HIDDEN = 'Price Hidden — Rules & Regulations Apply';
@@ -1365,7 +1420,7 @@ const PerformerDashboard = () => {
   const allMy = allOrders.filter(o => isMine(o));
   let gpsProofs = 0, aiProofs = 0, doneProofs = 0;
   allMy.forEach(o => (o.milestones || []).forEach(m => {
-    if (m.isCompleted) { doneProofs++; if (m.proofLocation) gpsProofs++; if (m.proofOcr && m.proofOcr.suggestion === 'verified') aiProofs++; }
+    if (isMilestoneCompleted(m)) { doneProofs++; if (m.proofLocation) gpsProofs++; if (m.proofOcr && m.proofOcr.suggestion === 'verified') aiProofs++; }
   }));
   const fiveStarCount = myCompleted.filter(o => ((o.feedback && o.feedback.rating) || o.rating || 0) === 5).length;
   const totalPoints = myCompleted.length * 100 + onTimeCount * 50 + fiveStarCount * 30 + aiProofs * 20 + (guideRead ? 40 : 0) + (streak.count >= 7 ? 50 : 0);
@@ -1374,7 +1429,7 @@ const PerformerDashboard = () => {
   const nextLvl = LEVELS[lvlIdx + 1] || null;
   const lvlProgress = nextLvl ? Math.min(100, Math.round(((totalPoints - lvl.min) / (nextLvl.min - lvl.min)) * 100)) : 100;
   const SHARE = lvlIdx >= 2 ? 0.88 : 0.85;
-  const earnOf = (o) => Math.round((o.price || 0) * SHARE);
+  const earnOf = useCallback((o) => Math.round((o.price || 0) * SHARE), [SHARE]);
   const queuePos = [4, 3, 2, 1][lvlIdx];
   const etaText = lvlIdx >= 2 ? '~1 hour' : '~2 hours';
 
@@ -1421,7 +1476,7 @@ const PerformerDashboard = () => {
       }
     }
     return buckets;
-  }, [earnRange, myCompleted, totalPoints]);
+  }, [earnRange, earnOf, myCompleted]);
 
   // ---------- PAYOUT BALANCE ----------
   const withdrawnTotal = payouts.filter(p => p.status !== 'Rejected').reduce((s, p) => s + (p.amount || 0), 0);
@@ -1457,11 +1512,32 @@ const PerformerDashboard = () => {
     if (seenAssignedRef.current === myAssigned._id) return;
     const first = seenAssignedRef.current === null;
     seenAssignedRef.current = myAssigned._id;
-    const text = `New task assigned: ${taskTitle(myAssigned)}`;
+    // v8.0: neutral wording — orders v2 auto-assigns Pending requests the
+    // moment they are booked, so the task may arrive without any admin tap.
+    const text = `New task assigned: ${taskTitle(myAssigned)} (${orderCode(myAssigned)})`;
     pushNotif(text);
-    toast.success(first ? 'You have an assigned task — press Start Task.' : 'New task assigned by Admin!');
+    toast.success(first ? 'You have an assigned task — press Start Task.' : 'New task assigned: ' + taskTitle(myAssigned));
     browserNotif('IbadahConnect — New Task', text);
-  }, [myAssigned && myAssigned._id, pushNotif]);
+  }, [myAssigned, pushNotif]);
+  // ---------- v8.0 SPONSOR GLITCH DIAGNOSTIC (one console warning) ----------
+  // If a task owned by this performer carries the performer's own id inside
+  // the sponsor field, the DB record is crossed — an outdated backend wrote
+  // the wrong field. The UI hides the wrong name; this warning now points to
+  // the delivered orders-v2.js, which fixes the sponsor name at the source.
+  const warnedSponsorRef = useRef(false);
+  useEffect(() => {
+    if (!SPONSOR_DEBUG || warnedSponsorRef.current) return;
+    const bad = allOrders.find(o => {
+      if (!isMine(o)) return false;
+      const s = sponsorObjOf(o);
+      const sid = sponsorIdOf(s);
+      return !!(sid && String(sid) === String(user.id || ''));
+    });
+    if (bad) {
+      warnedSponsorRef.current = true;
+      console.warn('[PerformerDashboard] Order ' + bad._id + ' has sponsor == the logged-in performer. Your backend/routes/orders.js is outdated — paste the delivered orders-v2.js (v2): it sets order.performer only on accept-task and computes sponsorName server-side on every response. Until then this dashboard hides the wrong name.');
+    }
+  }, [allOrders, isMine, user.id]);
 
   // ---------- AVAILABILITY TOGGLE ----------
   const handleToggleAvailability = () => {
@@ -1482,7 +1558,7 @@ const PerformerDashboard = () => {
 
   // ---------- ACTIONS ----------
   const handleLogout = () => {
-    localStorage.clear();
+    logout();
     navigate('/');
   };
 
@@ -1496,6 +1572,9 @@ const PerformerDashboard = () => {
       await fetchTasks(true);
     } catch (err) {
       toast.error((err.response && err.response.data && err.response.data.message) || 'Error starting task.');
+      // v8.0 race-safe UX: if another performer claimed this request first,
+      // refresh at once so it disappears from New Requests immediately.
+      if (err && err.response && err.response.status === 400) fetchTasks(true);
     }
   };
 
@@ -1507,7 +1586,7 @@ const PerformerDashboard = () => {
     if (!st) return;
     setProofPhotos([]); setReceiptState(null); setVideoState(null);
     setMsgDirty(false); setMsgText(''); setNoteText('');
-    setMsgFields(defaultMsgFields(order, st));
+    setMsgFields(defaultMsgFields(order, st, user));
     setAiStatus('idle'); setAiResult(null);
     setProofUrl(''); setProofPreview(''); setOcrStatus('idle'); setOcrResult(null);
     setShowCoords(false); setGpsBypass(false);
@@ -1516,12 +1595,6 @@ const PerformerDashboard = () => {
     setProofModal({ orderId: order._id, stepIdx, flow, stepKey: st.key, serviceType: order.serviceType, price: order.price, title: taskTitle(order), msLabel, closes: !!st.closes });
   };
 
-  const quickStart = () => {
-    if (myAssigned) { assignedRef.current && assignedRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-    if (myActive) { activeRef.current && activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-    if (!isBusy && newRequests.length) { requestsRef.current && requestsRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-    toast('No task available right now — you will be notified.');
-  };
   const quickUploadProof = () => {
     if (!myActive) { toast('Start a task first — proof upload unlocks after starting.'); return; }
     const steps = flowStepLib(flowOf(myActive));
@@ -1663,7 +1736,7 @@ const PerformerDashboard = () => {
   };
 
   // ---------- v6.0 PROOF UPLOADS (multi-photo + receipt + video) ----------
-  const uploadOne = async (file, label) => {
+  const uploadOne = async (file) => {
     const fd = new FormData();
     fd.append('file', file);
     const up = await API.post('/upload/proof', fd);
@@ -1747,6 +1820,7 @@ const PerformerDashboard = () => {
             capturedAt: new Date().toISOString()
           });
           setLocStatus('captured');
+          setPageGeo('on'); // a working GPS fix means location is really on
         },
         () => setLocStatus('error'),
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
@@ -1766,6 +1840,7 @@ const PerformerDashboard = () => {
           capturedAt: new Date().toISOString()
         });
         setLocStatus('captured');
+        setPageGeo('on');
       },
       () => setLocStatus('error'),
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
@@ -1784,6 +1859,12 @@ const PerformerDashboard = () => {
         reference: `${proofModal && proofModal.flow}-${proofModal && proofModal.stepKey}`,
         serviceType: (proofModal && proofModal.serviceType) || ''
       });
+      if (res.data?.available === false) {
+        setAiStatus('skip');
+        setAiResult(null);
+        toast(res.data.message || 'AI reference matching is unavailable. This proof will be reviewed manually.');
+        return;
+      }
       const raw = res.data && (res.data.matchPercent != null ? res.data.matchPercent : res.data.score);
       const pct = Number(raw);
       if (!Number.isFinite(pct)) { setAiStatus('skip'); setAiResult(null); return; }
@@ -1800,7 +1881,7 @@ const PerformerDashboard = () => {
   };
 
   // OCR receipt check (kept from v5.0 — runs on the first uploaded photo)
-  const runOcrCheck = async (url) => {
+  const runOcrCheck = useCallback(async (url) => {
     if (!url || !looksLikeImage(url)) return;
     setOcrStatus('checking');
     try {
@@ -1815,7 +1896,7 @@ const PerformerDashboard = () => {
     } catch {
       setOcrStatus('error');
     }
-  };
+  }, [proofModal]);
 
   useEffect(() => {
     if (!proofModal) return;
@@ -1823,7 +1904,7 @@ const PerformerDashboard = () => {
     if (!first || !looksLikeImage(first)) return;
     const t = setTimeout(() => runOcrCheck(first), 700);
     return () => clearTimeout(t);
-  }, [proofPhotos, proofModal]);
+  }, [proofPhotos, proofModal, runOcrCheck]);
 
   // ---------- v6.0 SUBMIT STEP ----------
   const submitStep = async () => {
@@ -1853,8 +1934,7 @@ const PerformerDashboard = () => {
       const addrParts = [];
       if (msg) addrParts.push(msg);
       if (noteText.trim()) addrParts.push(noteText.trim());
-      // The message travels to the sponsor's tracking page through
-      // proofLocation.address — TrackOrder reads it without any DB change.
+      // The message travels with the milestone location to the tracking page.
       const proofLocationPayload = gpsOk
         ? { lat: proofLocation.lat, lng: proofLocation.lng, capturedAt: proofLocation.capturedAt, address: addrParts.join(' | ') || 'GPS verified proof' }
         : (addrParts.length ? { address: addrParts.join(' | ') } : undefined);
@@ -1935,11 +2015,12 @@ const PerformerDashboard = () => {
   const modalMsgValue = modalStep && modalStep.msgTpl ? (msgDirty ? msgText : modalStep.msgTpl(msgFields)) : '';
 
   return (
-    <div className="min-h-screen bg-[#f0f2f5] text-gray-800 font-outfit pb-20 md:pb-0">
+    <div className="min-h-screen bg-[#FAFBF9] text-[#2A332E] ibd-pro pb-20 md:pb-0 flex flex-col">
+      <style>{FONT_CSS}</style>
 
       {/* ============ HEADER (same logo & colour scheme as the main website) ============ */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-gray-100 shadow-sm sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center gap-4">
+      <header className="bg-white border-b border-[#E5E9E4] sticky top-0 z-40">
+        <div className="max-w-[1240px] mx-auto px-4 md:px-6 h-16 flex justify-between items-center gap-4">
           <div className="flex items-center gap-3 flex-shrink-0 cursor-pointer" onClick={() => navigate('/')} title="Go to main website">
             <svg className="w-8 h-8" viewBox="0 0 100 100">
               <polygon points="50,5 61,35 95,35 68,55 79,90 50,70 21,90 32,55 5,35 39,35" fill="#1B5E20" stroke="#D4AF37" strokeWidth="5"/>
@@ -1952,36 +2033,38 @@ const PerformerDashboard = () => {
             </svg>
             <div className="leading-none hidden sm:block">
               <h1 className="text-xl md:text-2xl font-extrabold tracking-wide" style={{ fontFamily: 'Amiri, serif' }}>
-                <span className="text-primary">Ibadah</span><span className="text-accent">Connect</span>
+                <span style={{ color: '#1B5E20' }}>Ibadah</span><span style={{ color: '#D4AF37' }}>Connect</span>
               </h1>
               <p className="text-[8px] font-bold tracking-[0.3em] text-gray-400 uppercase mt-1">Performer Portal</p>
             </div>
           </div>
 
-          <div className="relative flex-1 max-w-md hidden md:block">
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-full bg-gray-50 border border-gray-200 text-gray-700 placeholder-gray-400 focus:outline-none focus:border-primary focus:bg-white transition-colors text-sm"
-            />
-            <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          {/* ===== v7.6 SEARCH (Stitch mockup: center search box, filters new requests) ===== */}
+          <div className="hidden md:flex flex-1 justify-center px-2">
+            <div className="relative w-full max-w-md">
+              <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8B9890] text-sm" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search tasks..."
+                className="w-full bg-[#F4F7F4] border border-transparent focus:border-[#0F4D38]/30 focus:bg-white rounded-full pl-10 pr-4 py-2 text-sm text-[#18261F] placeholder-[#8B9890] outline-none transition-colors"
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
-            <span className={`hidden md:inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-full border ${acceptingTasks ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
-              <span className={`w-2 h-2 rounded-full ${acceptingTasks ? 'bg-green-500' : 'bg-red-500'} animate-pulse`}></span>
+            <span className="hidden md:inline-flex items-center gap-1.5 text-sm text-[#2F3731]">
+              <span className={`w-2 h-2 rounded-full ${acceptingTasks ? 'bg-[#257657]' : 'bg-[#C68520]'} ${isBusy ? '' : 'animate-pulse'}`}></span>
               {acceptingTasks ? 'Available' : isBusy ? 'Busy' : 'Unavailable'}
             </span>
-            <button onClick={() => fetchTasks()} title="Refresh" className="text-lg text-gray-500 hover:text-primary hover:bg-gray-100 p-2 rounded-full transition-colors">
-              <FaSyncAlt className={loading ? 'animate-spin' : ''} />
+            <button onClick={() => window.location.reload()} title="Refresh data" className="text-[#48534C] hover:text-[#0F4D38] p-2 transition-colors">
+              <FaSyncAlt />
             </button>
             <div className="relative">
-              <button onClick={() => { setNotifOpen(v => !v); if (!notifOpen) markNotifsRead(); }} title="Notifications" className="relative text-lg text-gray-500 hover:text-primary hover:bg-gray-100 p-2 rounded-full transition-colors">
+              <button onClick={() => { setNotifOpen(v => !v); if (!notifOpen) markNotifsRead(); setProfileOpen(false); }} title="Notifications" className="relative text-base text-[#48534C] hover:text-[#0F4D38] p-2 transition-colors">
                 <FaBell />
                 {unreadNotifs > 0 && (
-                  <span className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 rounded-full border-2 border-white text-[10px] flex items-center justify-center font-bold text-white px-0.5">
+                  <span className="absolute top-0.5 right-0.5 min-w-[15px] h-[15px] bg-[#C68520] rounded-full border-2 border-white text-[9px] flex items-center justify-center font-bold text-white px-0.5">
                     {unreadNotifs > 9 ? '9+' : unreadNotifs}
                   </span>
                 )}
@@ -2008,277 +2091,324 @@ const PerformerDashboard = () => {
                 </div>
               )}
             </div>
-            <button onClick={() => setIsChatOpen(true)} className="text-sm font-semibold text-gray-600 hover:text-primary hover:bg-gray-100 px-3 py-2 rounded-full hidden md:flex items-center gap-2 transition-colors">
-              <FaCommentDots /> Live Chat
+            <button onClick={() => setIsChatOpen(true)} className="text-sm text-[#48534C] hover:text-[#0F4D38] px-1 py-2 hidden md:flex items-center gap-1.5 transition-colors">
+              <FaCommentDots /> Live chat
             </button>
-            <button onClick={handleLogout} className="text-sm font-semibold text-gray-600 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-full flex items-center gap-2 transition-colors">
-              <FaSignOutAlt /> <span className="hidden md:inline">Logout</span>
-            </button>
+            {/* ===== v7.1 PROFILE NAME MENU (old left sidebar now opens here) ===== */}
+            <div className="relative">
+              <button
+                onClick={() => { setProfileOpen(v => !v); setNotifOpen(false); }}
+                className="flex items-center gap-2.5 pl-1 pr-2.5 py-1.5 rounded-full border border-transparent hover:border-gray-200 hover:bg-gray-50 transition-all"
+                title="Your profile"
+              >
+                {profilePic ? (
+                  <img src={profilePic} alt="Me" className="w-8 h-8 rounded-full object-cover border border-gray-200 flex-shrink-0" />
+                ) : (
+                  <span className="w-8 h-8 rounded-full bg-[#0F4D38] text-white text-sm font-extrabold flex items-center justify-center flex-shrink-0">
+                    {user && user.firstName ? user.firstName[0].toUpperCase() : <FaUserCircle />}
+                  </span>
+                )}
+                <span className="hidden sm:block text-left leading-tight">
+                  <span className="block text-sm font-extrabold text-[#18261F] max-w-[130px] truncate">{user && user.firstName} {user && user.lastName}</span>
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-[#69786F]">{user && user.isVerified ? 'Verified Performer' : 'Verification pending'}</span>
+                </span>
+                <FaChevronDown className={`text-[10px] text-[#69786F] transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {profileOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)}></div>
+                  <div className="absolute right-0 top-12 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden flex flex-col max-h-[calc(100vh-6rem)]">
+                    <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+                      {profilePic ? (
+                        <img src={profilePic} alt="Profile" className="w-11 h-11 rounded-full object-cover border border-gray-200 flex-shrink-0" />
+                      ) : (
+                        <span className="w-11 h-11 rounded-full bg-[#0F4D38] flex items-center justify-center text-white text-lg font-bold flex-shrink-0">
+                          {user && user.firstName ? user.firstName[0].toUpperCase() : <FaUserCircle />}
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-extrabold text-[#18261F] truncate">{user && user.firstName} {user && user.lastName}</p>
+                        <p className="text-[10px] text-[#69786F] flex items-center gap-1 mt-0.5">
+                          {user && user.isVerified ? <><FaUserCheck className="text-[#257657]" /> Verified Performer</> : 'Verification pending'}
+                        </p>
+                      </div>
+                    </div>
+                    {/* v8.1: name + portal menu only — availability and profile strength moved to the Profile & Stats tab */}
+                    <div className="p-2 overflow-y-auto">
+                      <div>
+                        <p className="text-[9px] font-extrabold uppercase tracking-wider text-[#69786F] px-3 pt-1.5 pb-1.5">Portal menu</p>
+                        {menuItems.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => { setProfileOpen(false); setActiveTab(item.id); }}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-semibold transition-colors ${activeTab === item.id ? 'text-[#0F4D38] bg-gray-50' : 'text-[#2A332E] hover:bg-gray-50'}`}
+                          >
+                            {item.icon} {item.label}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => { setProfileOpen(false); markGuideRead(); navigate('/performer-rules'); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-[#2A332E] hover:bg-gray-50 transition-colors"
+                        >
+                          <FaScroll /> Rules &amp; Regulations
+                        </button>
+                      </div>
+                      <div className="border-t border-gray-100 mt-1 pt-1">
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-bold text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <FaSignOutAlt /> Log out
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 py-6 px-4">
+      <div className="max-w-[1240px] mx-auto py-6 px-4">
 
-        {/* ================= LEFT SIDEBAR ================= */}
-        <aside className="lg:col-span-3 space-y-4">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden sticky top-20">
-            <div className="h-28 bg-cover bg-center" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1591604129939-f1efa4d9f7fa?q=80&w=400&auto=format&fit=crop')" }}></div>
-            <div className="p-4 flex flex-col items-center -mt-12">
-              {profilePic ? (
-                <img src={profilePic} alt="Profile" className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md" />
-              ) : (
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary to-green-800 flex items-center justify-center text-white text-4xl border-4 border-white shadow-md font-bold">
-                  {user && user.firstName ? user.firstName[0].toUpperCase() : <FaUserCircle />}
-                </div>
-              )}
-              <h2 className="text-lg font-bold text-gray-900 mt-3 text-center">{user && user.firstName} {user && user.lastName}</h2>
-              {user && user.isVerified !== undefined && (
-                <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
-                  {user.isVerified ? <><FaUserCheck className="text-green-500" /> Verified Performer</> : 'Verification pending'}
-                </p>
-              )}
-              <div className="flex flex-wrap justify-center gap-1.5 mt-2">
-                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${performerType === 'Ibadah Team' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-purple-50 text-purple-700 border border-purple-200'}`}>
-                  {performerType === 'Ibadah Team' ? <FaMosque /> : <FaUsers />} {performerType}
-                </span>
-                {performerType === 'Self/Family' && agencyConnect === 'Connected' && (
-                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
-                    <FaHandshake /> {user.agencyName}
-                  </span>
-                )}
-              </div>
-
-              <button
-                onClick={handleToggleAvailability}
-                disabled={isBusy}
-                className={`mt-3 w-full flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border-2 transition-all ${acceptingTasks ? 'bg-green-50 border-green-300' : isBusy ? 'bg-red-50 border-red-200 cursor-not-allowed' : 'bg-red-50 border-red-300 hover:bg-red-100'}`}
-                title={isBusy ? 'Busy while a task is assigned or in progress' : 'Tap to switch'}
-              >
-                <span className="text-left">
-                  <span className={`block text-xs font-extrabold ${acceptingTasks ? 'text-green-700' : 'text-red-600'}`}>
-                    {acceptingTasks ? 'Available for Tasks' : isBusy ? 'Busy with Task' : 'Unavailable'}
-                  </span>
-                  <span className="block text-[9px] text-gray-400 font-semibold">{isBusy ? 'Auto-set — finish your task first' : 'Tap to toggle Available / Busy'}</span>
-                </span>
-                <span className={`w-10 h-5 rounded-full relative flex-shrink-0 transition-colors ${acceptingTasks ? 'bg-green-500' : 'bg-red-400'}`}>
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${acceptingTasks ? 'left-[22px]' : 'left-0.5'}`}></span>
-                </span>
-              </button>
-            </div>
-
-            <div className="px-4 pb-4">
-              <div className="bg-gray-50 rounded-xl border border-gray-100 p-3">
-                <div className="flex justify-between items-center mb-1.5">
-                  <p className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider flex items-center gap-1"><FaCheckDouble className="text-primary" /> Profile Strength</p>
-                  <p className={`text-[11px] font-extrabold ${profilePct === 100 ? 'text-green-600' : 'text-amber-600'}`}>{profilePct}%</p>
-                </div>
-                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full transition-all duration-700 ${profilePct === 100 ? 'bg-green-500' : 'bg-amber-400'}`} style={{ width: `${profilePct}%` }}></div>
-                </div>
-                <div className="mt-2 space-y-1">
-                  {profileChecks.map(c => (
-                    <p key={c.label} className={`text-[10px] font-semibold flex items-center gap-1.5 ${c.done ? 'text-gray-400 line-through' : 'text-gray-600'}`}>
-                      {c.done ? <FaCheckCircle className="text-green-500" /> : <FaExclamationTriangle className="text-amber-500" />}
-                      {c.label}
-                    </p>
-                  ))}
-                </div>
-                {nextProfileHint && profilePct < 100 && (
-                  <p className="text-[9px] text-amber-600 font-bold mt-2 leading-snug bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">{nextProfileHint}</p>
-                )}
-              </div>
-            </div>
-
-            <nav className="p-4 border-t border-gray-100 space-y-1 mt-2">
-              {menuItems.map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
-                    activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {item.icon} {item.label}
-                  {item.id === 'tasks' && (newRequests.length > 0 || myAssigned) && (
-                    <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{newRequests.length + (myAssigned ? 1 : 0)}</span>
-                  )}
-                </button>
-              ))}
-              <button
-                onClick={() => { markGuideRead(); navigate('/performer-rules'); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm text-purple-600 hover:bg-purple-50 border border-purple-100 transition-colors"
-              >
-                <FaScroll /> Rules &amp; Regulations
-              </button>
-            </nav>
-          </div>
-        </aside>
-
-        {/* ================= MAIN CONTENT ================= */}
-        <main className="lg:col-span-6 space-y-6">
+        {/* ================= MAIN CONTENT (Stitch mockup: 8/4 grid) ================= */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <main className={`${activeTab === 'tasks' ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6`}>
 
           {activeTab === 'tasks' && (
             <>
-              <div className="relative rounded-xl overflow-hidden h-32 flex items-center p-6 bg-gradient-to-r from-[#1B5E20] to-[#0a1a14] shadow-md">
-                <div className="relative z-10 flex-1 min-w-0">
-                  <h2 className="text-2xl font-extrabold text-white">Assalamu Alaikum, {user && user.firstName}!</h2>
-                  <p className="text-white/80 text-sm mt-1">
-                    {myActive ? 'Your active task is front and center below — one step at a time.' : myAssigned ? 'Admin has assigned you a task — press Start Task to unlock Step 1.' : acceptingTasks ? 'You are available. New requests appear below.' : 'You are marked Busy — toggle availability when you are ready.'}
+              {/* ===== PAGE HEADER (mockup: serif display + status dot) ===== */}
+              <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-2">
+                <div className="min-w-0">
+                  <h1 className="font-serif text-4xl md:text-[42px] leading-tight text-[#163D2E] font-normal">Active task</h1>
+                  <p className="text-sm text-[#55635B] mt-1">
+                    Assalamu alaikum, {user && user.firstName}. {myActive ? 'Finish each step with proof to unlock the next.' : myAssigned ? 'You have an assigned task — press Start Task to unlock Step 1.' : acceptingTasks ? 'You are available — new requests appear below.' : 'You are marked Busy — open Profile & Stats to switch availability.'}
                   </p>
                 </div>
-                <button onClick={handleToggleAvailability} disabled={isBusy}
-                  className={`relative z-10 ml-3 flex-shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold border transition-all ${acceptingTasks ? 'bg-green-500/20 text-green-100 border-green-300/40 hover:bg-green-500/30' : isBusy ? 'bg-red-500/20 text-red-100 border-red-300/40 cursor-not-allowed' : 'bg-red-500/20 text-red-100 border-red-300/40 hover:bg-red-500/30'}`}>
-                  <span className={`w-2 h-2 rounded-full ${acceptingTasks ? 'bg-green-400' : 'bg-red-400'} animate-pulse`}></span>
-                  {acceptingTasks ? 'Available' : isBusy ? 'Busy' : 'Unavailable'}
-                </button>
-                <FaPrayingHands className="absolute right-4 bottom-2 text-white/10 text-8xl" />
+                <div className="mt-1 md:mt-0 flex items-center gap-2 text-sm text-[#38423C] flex-shrink-0">
+                  <span className={`w-2 h-2 rounded-full ${myActive ? 'bg-[#C68520]' : acceptingTasks ? 'bg-[#257657]' : 'bg-[#C68520]'}`}></span>
+                  <span>{myActive ? 'In progress' : acceptingTasks ? 'Available' : isBusy ? 'Busy' : 'Unavailable'}</span>
+                </div>
               </div>
+
+              {/* ===== v7.6 LOCATION BANNER (Stitch mockup: toggle + text + Try again; toggle opens the full-page map) ===== */}
+              <div className={`flex items-center gap-3.5 rounded-xl border px-4 py-3 ${pageGeo === 'on' ? 'bg-[#F4F7F4] border-[#DCE4DC]' : 'bg-white border-[#E3E8E3]'}`}>
+                <button
+                  onClick={() => setMapOpen(true)}
+                  title="Open your live location map on a separate page"
+                  className={`w-11 h-6 rounded-full relative flex-shrink-0 transition-colors ${pageGeo === 'on' ? 'bg-[#0F4D38]' : 'bg-[#C9D2CA]'}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${pageGeo === 'on' ? 'left-[22px]' : 'left-0.5'}`}></span>
+                </button>
+                <p className="text-[13px] leading-snug text-[#38423C] min-w-0">
+                  <span className="font-bold text-[#18261F]">{pageGeo === 'checking' ? 'Checking location…' : pageGeo === 'on' ? 'Location on' : 'Location off'}</span>
+                  {' — '}{pageGeo === 'on' ? 'your GPS pin is live; tap the switch to open your map page.' : 'Your browser is blocking location — allow Location access for this site, then try again.'}
+                </p>
+                {pageGeo !== 'on' && (
+                  <button onClick={() => checkPageGeo(true)} className="ml-auto flex-shrink-0 text-sm font-bold text-[#257657] hover:text-[#0F4D38] transition-colors">Try again</button>
+                )}
+              </div>
+
+              {/* ===== ASSIGNED BY / ON / AT (mockup metadata row) ===== */}
+              {(myActive || myAssigned) && (myActive || myAssigned).createdAt && (() => {
+                const metaSrc = myActive || myAssigned;
+                const metaDate = new Date(metaSrc.createdAt);
+                return (
+                  <section className="grid grid-cols-1 md:grid-cols-3 border-b border-[#E3E8E3] pb-6">
+                    <div className="border-b md:border-b-0 md:border-r border-[#E3E8E3] pb-3 md:pb-0 md:pr-6">
+                      <span className="text-xs uppercase tracking-wider text-[#69786F] block mb-1">Assigned by</span>
+                      <span className="font-serif text-2xl md:text-[28px] text-[#132C22] leading-none">Admin</span>
+                    </div>
+                    <div className="border-b md:border-b-0 md:border-r border-[#E3E8E3] py-3 md:py-0 md:px-8">
+                      <span className="text-xs uppercase tracking-wider text-[#69786F] block mb-1">Assigned on</span>
+                      <span className="font-serif text-2xl md:text-[28px] text-[#132C22] leading-none">{metaDate.toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    </div>
+                    <div className="pt-3 md:pt-0 md:pl-8">
+                      <span className="text-xs uppercase tracking-wider text-[#69786F] block mb-1">Assigned at</span>
+                      <span className="font-serif text-2xl md:text-[28px] text-[#132C22] leading-none">{metaDate.toLocaleTimeString('en-PK', { hour: 'numeric', minute: '2-digit' })}</span>
+                    </div>
+                  </section>
+                );
+              })()}
 
               {/* ===== ASSIGNED TASK (Purple Card + Start Task) ===== */}
               {myAssigned && (
-                <div ref={assignedRef} className="bg-white rounded-2xl shadow-lg border-2 border-purple-300 overflow-hidden">
-                  <div className="p-4 bg-gradient-to-r from-purple-600 to-indigo-600 flex justify-between items-center gap-3">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2"><FaTasks /> New Task Assigned by Admin</h3>
-                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white flex-shrink-0">Assigned</span>
-                  </div>
-                  <div className="p-5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h4 className="text-xl font-extrabold text-gray-900">{taskTitle(myAssigned)}</h4>
-                      <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${FLOW_CHIP[flowOf(myAssigned)].cls}`}>{FLOW_CHIP[flowOf(myAssigned)].label}</span>
+                <article ref={assignedRef} className="bg-white border border-[#E1E7E1] rounded-xl p-6 md:p-8 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-serif text-[26px] md:text-3xl text-[#163D2E] leading-tight">{taskTitle(myAssigned)}</h2>
+                      <div className="mt-2 w-14 h-[3px] bg-[#C29845] rounded-full"></div>
                     </div>
-                    <p className="text-sm text-gray-500 mt-1 flex flex-wrap items-center gap-2">
-                      <FaUserTag /> Sponsor: {(myAssigned.sponsor && typeof myAssigned.sponsor === 'object') ? `${pickStr(myAssigned.sponsor.firstName)} ${pickStr(myAssigned.sponsor.lastName)}`.trim() : '—'}
-                      {pickStr(myAssigned.recipientName) && <span>&bull; Recipient: {pickStr(myAssigned.recipientName)}{pickStr(myAssigned.recipientRelation) && ` (${pickStr(myAssigned.recipientRelation)})`}</span>}
-                    </p>
-                    <p className="text-[13px] text-gray-600 leading-relaxed mt-2">{taskDesc(myAssigned)}</p>
-
-                    <div className="grid grid-cols-2 gap-3 mt-4">
-                      <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
-                        <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider">Your Earning ({Math.round(SHARE * 100)}%)</p>
+                    <span className="px-3.5 py-1 text-xs font-medium text-[#4C5B52] border border-[#CCD5CD] rounded-md bg-[#FBFDFB] flex-shrink-0 mt-1">{FLOW_CHIP[flowOf(myAssigned)].label}</span>
+                  </div>
+                  <div className="mt-4 mb-6 w-full bg-[#E5EAE5] h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-[#B99147] h-full rounded-full" style={{ width: '0%' }}></div>
+                  </div>
+                  <div className="space-y-5 border-b border-[#EDF1ED] pb-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Sponsor</span>
+                        <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-2 flex-wrap">{sponsorLabelOf(myAssigned, user) || 'Not yet assigned'}{sponsorLabelOf(myAssigned, user) && <span className="text-[9px] font-bold tracking-wide uppercase text-[#257657] bg-[#EAF4EE] border border-[#CBE2D3] rounded px-1.5 py-0.5">Verified sponsor</span>}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Recipient</span>
+                        <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-2 flex-wrap">{pickStr(myAssigned.recipientName) || '—'}{pickStr(myAssigned.recipientRelation) ? ` (${pickStr(myAssigned.recipientRelation)})` : ''}{pickStr(myAssigned.recipientName) && <span className="text-[9px] font-bold tracking-wide uppercase text-[#8F6D32] bg-[#F7F1E4] border border-[#E3D9C2] rounded px-1.5 py-0.5">Beneficiary</span>}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Order ID</span>
+                        <span className="text-base text-[#192A21] font-medium">{orderCode(myAssigned)}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Progress</span>
+                        <span className="text-base text-[#192A21] font-medium">0 of {flowStepLib(flowOf(myAssigned)).length} completed</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Earnings ({Math.round(SHARE * 100)}%)</span>
                         {isDonation(myAssigned) ? (
-                          <p className="text-sm font-extrabold text-purple-700 mt-1 leading-snug flex items-start gap-1"><FaLock className="mt-0.5 flex-shrink-0" /> {PRICE_HIDDEN}</p>
+                          <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-1"><FaLock className="text-[#8B9890]" /> {Math.round(SHARE * 100)}% (after review)</span>
                         ) : (
-                          <p className="text-lg font-extrabold text-purple-700">PKR {earnOf(myAssigned).toLocaleString()}</p>
+                          <span className="text-base text-[#192A21] font-medium">PKR {earnOf(myAssigned).toLocaleString()}</span>
                         )}
                       </div>
-                      <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Guided Steps</p>
-                        <p className="text-lg font-extrabold text-gray-700">{flowStepLib(flowOf(myAssigned)).length} Steps</p>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Type</span>
+                        <span className="text-base text-[#192A21] font-medium">{KIND_LABEL[flowOf(myAssigned)]}</span>
                       </div>
                     </div>
+                  </div>
+                  <p className="text-[14.5px] leading-relaxed text-[#414E46] mt-6">{taskDesc(myAssigned)}</p>
 
                     {myAssigned.reason && myAssigned.reason !== 'N/A' && (
-                      <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                        <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">Reason for Ibadah</p>
-                        <p className="text-sm text-gray-700 italic">"{myAssigned.reason}"</p>
+                      <div className="mt-5 pl-4 border-l-2 border-[#BE9647]">
+                        <p className="text-sm text-[#27382E]">Reason for ibadah: {myAssigned.reason}</p>
                       </div>
                     )}
                     {myAssigned.notes && (
-                      <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
-                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Special Instructions / Dua</p>
-                        <p className="text-sm text-gray-700 italic">"{myAssigned.notes}"</p>
+                      <div className="mt-4 pl-4 border-l-2 border-[#BE9647]">
+                        <p className="text-sm text-[#27382E]">Note from sponsor: {myAssigned.notes}</p>
                       </div>
                     )}
 
                     <TaskTimer order={myAssigned} now={now} />
 
-                    <button
-                      onClick={() => handleStartTask(myAssigned._id)}
-                      className="mt-5 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-extrabold py-3.5 rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 text-base shadow-lg"
-                    >
-                      <FaPlay /> Start Task — Unlock Step 1
-                    </button>
-                  </div>
-                </div>
+                    <div className="mt-7 flex flex-wrap items-center gap-3.5">
+                      <button
+                        onClick={() => handleStartTask(myAssigned._id)}
+                        className="bg-[#0E4230] hover:bg-[#093224] text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        <FaPlay /> Start Task — Unlock Step 1
+                      </button>
+                    </div>
+                  </article>
               )}
 
               {/* ===== ACTIVE TASK — FRONTMOST CARD (identity + description + map + one-by-one guided steps) ===== */}
               {myActive && (
-                <div ref={activeRef} className="bg-white rounded-xl shadow-sm border-2 border-green-200">
-                  <div className="p-4 border-b border-gray-100 bg-green-50 flex justify-between items-center gap-3">
-                    <div className="min-w-0">
-                      <h3 className="text-lg font-bold text-green-700 flex items-center gap-2"><FaMosque /> Your Active Task</h3>
-                      <p className="text-xs text-gray-500 mt-0.5">One step at a time — complete a step with proof and the next one unlocks.</p>
+                <article ref={activeRef} className="bg-white border border-[#E1E7E1] rounded-xl p-6 md:p-8 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-serif text-[26px] md:text-3xl text-[#163D2E] leading-tight">{taskTitle(myActive)}</h2>
+                      <div className="mt-2 w-14 h-[3px] bg-[#C29845] rounded-full"></div>
                     </div>
-                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700 flex items-center gap-1 flex-shrink-0"><FaHourglassHalf /> In Progress</span>
+                    <span className="px-3.5 py-1 text-xs font-medium text-[#4C5B52] border border-[#CCD5CD] rounded-md bg-[#FBFDFB] flex-shrink-0 mt-1">{FLOW_CHIP[flowOf(myActive)].label}</span>
                   </div>
-                  <div className="p-5">
-                    {/* REAL PACKAGE / REQUEST IDENTITY */}
-                    <div className="flex gap-4 items-start">
-                      {(() => { const p = pkgOf(myActive); return p && p.img ? (
-                        <img src={p.img} alt={p.name} className="w-20 h-20 rounded-xl object-cover border border-gray-200 shadow-sm flex-shrink-0" />
-                      ) : (
-                        <div className="w-14 h-14 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center text-2xl flex-shrink-0"><FaKaaba /></div>
-                      ); })()}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-xl font-extrabold text-gray-900">{taskTitle(myActive)}</h4>
-                          <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${FLOW_CHIP[flowOf(myActive)].cls}`}>{FLOW_CHIP[flowOf(myActive)].label}</span>
-                        </div>
-                        <p className="text-sm text-gray-500 mt-1 flex flex-wrap items-center gap-2">
-                          <FaUserTag /> Sponsor: {(myActive.sponsor && typeof myActive.sponsor === 'object') ? `${pickStr(myActive.sponsor.firstName)} ${pickStr(myActive.sponsor.lastName)}`.trim() : '—'}
-                          {pickStr(myActive.recipientName) && <span>&bull; Recipient: {pickStr(myActive.recipientName)}{pickStr(myActive.recipientRelation) && ` (${pickStr(myActive.recipientRelation)})`}</span>}
-                        </p>
-                        <p className="text-[13px] text-gray-600 leading-relaxed mt-2">{taskDesc(myActive)}</p>
+                  <div className="mt-4 mb-6 w-full bg-[#E5EAE5] h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-[#B99147] h-full rounded-full transition-all duration-700" style={{ width: `${Math.round((guidedProgress(myActive).done / Math.max(1, guidedProgress(myActive).total)) * 100)}%` }}></div>
+                  </div>
+                  <div className="space-y-5 border-b border-[#EDF1ED] pb-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Sponsor</span>
+                        <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-2 flex-wrap">{sponsorLabelOf(myActive, user) || 'Not yet assigned'}{sponsorLabelOf(myActive, user) && <span className="text-[9px] font-bold tracking-wide uppercase text-[#257657] bg-[#EAF4EE] border border-[#CBE2D3] rounded px-1.5 py-0.5">Verified sponsor</span>}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Recipient</span>
+                        <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-2 flex-wrap">{pickStr(myActive.recipientName) || '—'}{pickStr(myActive.recipientRelation) ? ` (${pickStr(myActive.recipientRelation)})` : ''}{pickStr(myActive.recipientName) && <span className="text-[9px] font-bold tracking-wide uppercase text-[#8F6D32] bg-[#F7F1E4] border border-[#E3D9C2] rounded px-1.5 py-0.5">Beneficiary</span>}</span>
                       </div>
                     </div>
-
-                    {/* Earning + guided progress mini-grid */}
-                    <div className="grid grid-cols-2 gap-3 mt-4">
-                      <div className="bg-green-50 rounded-xl p-3 border border-green-100">
-                        <p className="text-[10px] font-bold text-green-600 uppercase tracking-wider">Your Earning ({Math.round(SHARE * 100)}%)</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Order ID</span>
+                        <span className="text-base text-[#192A21] font-medium">{orderCode(myActive)}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Progress</span>
+                        <span className="text-base text-[#192A21] font-medium">{guidedProgress(myActive).done} of {guidedProgress(myActive).total} completed</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Earnings ({Math.round(SHARE * 100)}%)</span>
                         {isDonation(myActive) ? (
-                          <p className="text-sm font-extrabold text-green-700 mt-1 leading-snug flex items-start gap-1"><FaLock className="mt-0.5 flex-shrink-0" /> {PRICE_HIDDEN}</p>
+                          <span className="text-base text-[#192A21] font-medium inline-flex items-center gap-1"><FaLock className="text-[#8B9890]" /> {Math.round(SHARE * 100)}% (after review)</span>
                         ) : (
-                          <p className="text-lg font-extrabold text-green-700">PKR {earnOf(myActive).toLocaleString()}</p>
+                          <span className="text-base text-[#192A21] font-medium">PKR {earnOf(myActive).toLocaleString()}</span>
                         )}
                       </div>
-                      <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Steps</p>
-                        <p className="text-lg font-extrabold text-gray-700">{guidedProgress(myActive).done} / {guidedProgress(myActive).total} <span className="text-xs font-bold text-gray-400">done</span></p>
+                      <div>
+                        <span className="text-xs text-[#717E77] block mb-1">Type</span>
+                        <span className="text-base text-[#192A21] font-medium">{KIND_LABEL[flowOf(myActive)]}</span>
                       </div>
                     </div>
+                  </div>
+                  <p className="text-[14.5px] leading-relaxed text-[#414E46] mt-6">{taskDesc(myActive)}</p>
+
+                    {/* Reference action row: Start step N / Upload proof / Message admin */}
+                    {(() => {
+                      const stepsBtn = flowStepLib(flowOf(myActive));
+                      const ledgerBtn = loadLedger(myActive._id);
+                      let openIdx = stepsBtn.findIndex((s, i) => !stepDone(myActive, stepsBtn, i, ledgerBtn));
+                      const allDone = openIdx === -1;
+                      if (openIdx === -1) openIdx = 0;
+                      return (
+                        <div className="flex flex-wrap items-center gap-3.5 mt-6">
+                          <button onClick={() => openStepModal(myActive, openIdx)} disabled={allDone}
+                            className={`text-sm font-medium px-5 py-2.5 rounded-lg transition-colors flex items-center gap-2 ${allDone ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-[#0E4230] hover:bg-[#093224] text-white'}`}>
+                            <FaPlay /> {allDone ? 'All steps submitted' : `Start step ${openIdx + 1}`}
+                          </button>
+                          <button onClick={quickUploadProof} className="border border-[#CBD4CB] hover:bg-gray-50 text-[#1F2F25] text-sm font-medium px-5 py-2.5 rounded-lg bg-white flex items-center gap-2 transition-colors">
+                            <FaUpload /> Upload proof
+                          </button>
+                          <button onClick={() => setIsChatOpen(true)} className="text-[#2B3B31] hover:text-black text-sm font-medium px-3 py-2.5 flex items-center gap-2 transition-colors">
+                            <FaCommentDots /> Message admin
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {myActive.reason && myActive.reason !== 'N/A' && (
-                      <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                        <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">Reason for Ibadah</p>
-                        <p className="text-sm text-gray-700 italic">"{myActive.reason}"</p>
+                      <div className="mt-5 pl-4 border-l-2 border-[#BE9647]">
+                        <p className="text-sm text-[#27382E]">Reason for ibadah: {myActive.reason}</p>
                       </div>
                     )}
                     {myActive.notes && (
-                      <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
-                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Special Instructions / Dua</p>
-                        <p className="text-sm text-gray-700 italic">"{myActive.notes}"</p>
+                      <div className="mt-4 pl-4 border-l-2 border-[#BE9647]">
+                        <p className="text-sm text-[#27382E]">Note from sponsor: {myActive.notes}</p>
                       </div>
                     )}
 
                     <TaskTimer order={myActive} mode="active" now={now} />
 
-                    {/* ALWAYS-UNLOCKED LIVE MAP (pinned to the current guided step's site) */}
-                    <TaskMap
-                      flow={flowOf(myActive)}
-                      stepName={(() => {
-                        const stepsA = flowStepLib(flowOf(myActive));
-                        const ledgerA = loadLedger(myActive._id);
-                        let idxA = stepsA.findIndex((s, i) => !stepDone(myActive, stepsA, i, ledgerA));
-                        if (idxA === -1) idxA = stepsA.length - 1;
-                        return stepsA[idxA] ? stepsA[idxA].key : '';
-                      })()}
-                    />
-
                     <div className="mt-4">
                       <StepFlow order={myActive} openStepModal={openStepModal} logTick={logTick} />
                     </div>
-                  </div>
-                </div>
+                  </article>
               )}
 
               {/* ===== NEW REQUESTS (Pending) ===== */}
               {!isBusy && newRequests.length > 0 && (
-                <div ref={requestsRef} className="bg-white rounded-xl shadow-sm border border-red-200">
-                  <div className="p-4 border-b border-gray-100 bg-red-50 flex justify-between items-center">
-                    <h3 className="text-lg font-bold text-red-600 flex items-center gap-2"><FaBell /> New Task Requests ({newRequests.length})</h3>
+                <div ref={requestsRef} className="bg-white rounded-xl shadow-sm border border-gray-200">
+                  <div className="p-4 border-b border-gray-100 bg-gray-50">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><FaBell /> New Task Requests ({newRequests.length})</h3>
+                    </div>
+                    {/* v8.0: orders v2 auto-assigns Pending requests to available performers */}
+                    <p className="text-xs text-gray-500 mt-1">Open requests can be auto-assigned to any available performer at booking time — accept fast to claim one yourself.</p>
                   </div>
                   <div className="divide-y divide-gray-100">
                     {newRequests
@@ -2289,11 +2419,11 @@ const PerformerDashboard = () => {
                           <h4 className="text-lg font-bold text-gray-900">{taskTitle(order)}</h4>
                           <p className="text-[12px] text-gray-500 leading-relaxed pr-2">{taskDesc(order)}</p>
                           <p className="text-sm text-gray-500 flex items-center gap-2"><FaUserTag /> Recipient: {pickStr(order.recipientName) || '—'} ({pickStr(order.recipientRelation) || 'N/A'})</p>
-                          <p className="text-sm text-gray-500">Sponsor: {(order.sponsor && typeof order.sponsor === 'object') ? `${pickStr(order.sponsor.firstName)} ${pickStr(order.sponsor.lastName)}`.trim() : '—'}</p>
+                          <p className="text-sm text-gray-500">Sponsor: {sponsorLabelOf(order, user) || '—'}</p>
                           {isDonation(order) ? (
-                            <p className="text-sm text-purple-600 font-bold mt-2 flex items-center gap-1"><FaLock /> {PRICE_HIDDEN}</p>
+                            <p className="text-sm text-gray-600 font-bold mt-2 flex items-center gap-1"><FaLock /> {PRICE_HIDDEN}</p>
                           ) : (
-                            <p className="text-sm text-green-600 font-bold mt-2 flex items-center gap-2"><FaMoneyBillWave /> Your Earning: PKR {earnOf(order).toLocaleString()}</p>
+                            <p className="text-sm text-gray-700 font-bold mt-2 flex items-center gap-2"><FaMoneyBillWave /> Your Earning: PKR {earnOf(order).toLocaleString()}</p>
                           )}
                         </div>
                         <button
@@ -2311,10 +2441,10 @@ const PerformerDashboard = () => {
               {/* ===== LIVE EMPTY STATE ===== */}
               {!isBusy && newRequests.filter(o => !searchQuery || `${o.serviceType} ${o.recipientName}`.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                    <FaKaaba className="text-6xl text-primary/25 mx-auto mb-4 animate-spin" />
+                    <FaKaaba className="text-5xl text-gray-200 mx-auto mb-4" />
                     <p className="text-lg font-extrabold text-gray-700">You are #{queuePos} in the task queue</p>
                     <p className="text-xs text-gray-400 mt-1.5 max-w-sm mx-auto leading-relaxed">
-                      Tasks are assigned by priority — {lvl.name} level performers are picked first. Next task expected within {etaText}. Keep your availability ON.
+                      New bookings are auto-assigned to available performers the moment they arrive — {lvl.name} level performers are picked first. Next task expected within {etaText}. Keep your availability ON.
                     </p>
                     <div className="flex flex-wrap justify-center gap-1.5 mt-4">
                       <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">{newRequests.length} open request(s) in system</span>
@@ -2395,7 +2525,7 @@ const PerformerDashboard = () => {
                   {myCompleted.slice(0, 4).map(order => (
                     <div key={order._id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
                       <div className="flex justify-between mb-2">
-                        <h4 className="font-bold text-gray-900">{order.sponsor && `${order.sponsor.firstName} ${order.sponsor.lastName}`}</h4>
+                        <h4 className="font-bold text-gray-900">{sponsorLabelOf(order, user) || 'Anonymous Sponsor'}</h4>
                         <div className="flex text-yellow-400 text-sm"><FaStar /><FaStar /><FaStar /><FaStar /><FaStar /></div>
                       </div>
                       <p className="text-sm text-gray-600">Task "{taskTitle(order)}" — "The photo proofs gave me complete peace of mind. JazakAllah Khair!"</p>
@@ -2409,12 +2539,12 @@ const PerformerDashboard = () => {
           {/* ================= EARNINGS TAB (balance + chart + payouts) ================= */}
           {activeTab === 'earnings' && (
             <div className="space-y-6">
-              <div className="bg-gradient-to-r from-[#1B5E20] to-[#0a1a14] p-6 rounded-xl shadow-sm text-white">
-                <p className="text-sm opacity-80">Available Balance ({Math.round(SHARE * 100)}% share tier)</p>
-                <h3 className="text-4xl font-extrabold mt-2">PKR {availableBalance.toLocaleString()}</h3>
-                <p className="text-xs opacity-70 mt-1">Lifetime: PKR {totalEarnings.toLocaleString()} • Requested: PKR {withdrawnTotal.toLocaleString()}</p>
+              <div className="bg-white border border-gray-200 p-6 rounded-xl">
+                <p className="text-sm text-gray-500">Available Balance ({Math.round(SHARE * 100)}% share tier)</p>
+                <h3 className="text-4xl font-extrabold mt-2 text-gray-900">PKR {availableBalance.toLocaleString()}</h3>
+                <p className="text-xs text-gray-400 mt-1">Lifetime: PKR {totalEarnings.toLocaleString()} • Requested: PKR {withdrawnTotal.toLocaleString()}</p>
                 {myActive && (
-                  <p className="text-sm mt-3 bg-white/10 inline-block px-3 py-1.5 rounded-lg">
+                  <p className="text-sm mt-3 bg-gray-50 border border-gray-100 inline-block px-3 py-1.5 rounded-lg">
                     {isDonation(myActive) ? (
                       <>In Progress: <span className="font-bold text-accent inline-flex items-center gap-1"><FaLock /> Price Hidden</span> (Rules &amp; Regulations apply)</>
                     ) : (
@@ -2422,10 +2552,10 @@ const PerformerDashboard = () => {
                     )}
                   </p>
                 )}
-                <button onClick={openWithdraw} disabled={availableBalance < 500} className="mt-4 bg-accent text-dark font-bold px-6 py-2 rounded-lg text-sm hover:bg-yellow-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+                <button onClick={openWithdraw} disabled={availableBalance < 500} className="mt-4 bg-gray-900 text-white font-semibold px-6 py-2 rounded-lg text-sm hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
                   <FaArrowUp /> Withdraw Funds
                 </button>
-                {availableBalance < 500 && <p className="text-[10px] opacity-60 mt-2">Minimum withdrawal is PKR 500 — complete more tasks to unlock payouts.</p>}
+                {availableBalance < 500 && <p className="text-[10px] text-gray-400 mt-2">Minimum withdrawal is PKR 500 — complete more tasks to unlock payouts.</p>}
               </div>
 
               <EarningsChart chartData={chartData} earnRange={earnRange} setEarnRange={setEarnRange} share={SHARE} />
@@ -2495,6 +2625,51 @@ const PerformerDashboard = () => {
               </div>
 
               <BriefingCard prayerData={prayerData} weather={weather} queuePos={queuePos} etaText={etaText} openCount={newRequests.length} />
+
+              {/* --- v8.1 AVAILABILITY (moved out of the name menu) --- */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className="font-extrabold text-gray-800 flex items-center gap-2"><FaUserCheck className="text-primary" /> Availability</h3>
+                    <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
+                      {isBusy ? 'Busy is automatic while a task is assigned or in progress — it clears when the task finishes.' : 'Available performers receive new bookings; Busy pauses new assignments.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleToggleAvailability}
+                    disabled={isBusy}
+                    className={`w-12 h-6 rounded-full relative flex-shrink-0 transition-colors ${acceptingTasks ? 'bg-[#0F4D38]' : 'bg-[#C9D2CA]'}`}
+                    title={isBusy ? 'Busy while a task is assigned or in progress' : 'Tap to switch'}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${acceptingTasks ? 'left-[26px]' : 'left-0.5'}`}></span>
+                  </button>
+                </div>
+                <p className={`text-xs font-extrabold mt-3 ${acceptingTasks ? 'text-green-700' : 'text-red-600'}`}>
+                  {acceptingTasks ? 'Available for Tasks' : isBusy ? 'Busy with Task' : 'Unavailable'}
+                </p>
+              </div>
+
+              {/* --- v8.1 PROFILE STRENGTH (moved out of the name menu) --- */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-extrabold text-gray-800 flex items-center gap-2"><FaCheckDouble className="text-primary" /> Profile Strength</h3>
+                  <p className={`text-xs font-extrabold ${profilePct === 100 ? 'text-green-600' : 'text-amber-600'}`}>{profilePct}%</p>
+                </div>
+                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-700 ${profilePct === 100 ? 'bg-green-500' : 'bg-amber-400'}`} style={{ width: `${profilePct}%` }}></div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {profileChecks.map(c => (
+                    <p key={c.label} className={`text-[11px] font-semibold flex items-center gap-1.5 ${c.done ? 'text-gray-400 line-through' : 'text-gray-600'}`}>
+                      {c.done ? <FaCheckCircle className="text-green-500" /> : <FaExclamationTriangle className="text-amber-500" />}
+                      {c.label}
+                    </p>
+                  ))}
+                </div>
+                {nextProfileHint && profilePct < 100 && (
+                  <p className="text-[11px] text-amber-600 font-bold mt-3 leading-snug bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">{nextProfileHint}</p>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <CountStat icon={FaMoneyBillWave} label="Earnings" value={totalEarnings} prefix="PKR " tone="text-green-600" sub={`${Math.round(SHARE * 100)}% share tier`} />
@@ -2725,86 +2900,150 @@ const PerformerDashboard = () => {
           )}
         </main>
 
-        {/* ================= RIGHT SIDEBAR (task-focused rail) ================= */}
-        <aside className="lg:col-span-3 space-y-4">
-          {activeTab === 'tasks' ? (
-            <>
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-md font-bold text-gray-800 mb-3 border-b pb-2 flex items-center gap-2"><FaBolt className="text-accent" /> Quick Actions</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={quickStart} className="border border-gray-200 rounded-xl p-2.5 flex flex-col items-center gap-1 hover:border-primary hover:shadow-sm transition-all">
-                    <FaPlay className="text-primary text-base" /><span className="text-[10px] font-extrabold text-gray-700">Start Task</span>
-                  </button>
-                  <button onClick={quickUploadProof} className="border border-gray-200 rounded-xl p-2.5 flex flex-col items-center gap-1 hover:border-primary hover:shadow-sm transition-all">
-                    <FaUpload className="text-blue-500 text-base" /><span className="text-[10px] font-extrabold text-gray-700">Upload Proof</span>
-                  </button>
-                  <button onClick={() => setIsChatOpen(true)} className="border border-gray-200 rounded-xl p-2.5 flex flex-col items-center gap-1 hover:border-primary hover:shadow-sm transition-all">
-                    <FaCommentDots className="text-purple-500 text-base" /><span className="text-[10px] font-extrabold text-gray-700">Chat Admin</span>
-                  </button>
-                  <button onClick={() => { markGuideRead(); navigate('/performer-rules'); }} className="border border-gray-200 rounded-xl p-2.5 flex flex-col items-center gap-1 hover:border-primary hover:shadow-sm transition-all">
-                    <FaQuran className="text-accent text-base" /><span className="text-[10px] font-extrabold text-gray-700">Read Guide</span>
-                  </button>
-                </div>
+        {/* ===== v7.6 RIGHT RAIL (Stitch mockup: Quick Actions + How It Works) ===== */}
+        {activeTab === 'tasks' && (
+          <aside className="lg:col-span-4 space-y-6 lg:sticky lg:top-20">
+            {/* Quick Actions */}
+            <section className="bg-white border border-[#E1E7E1] rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+              <p className="text-sm font-bold text-[#18261F] flex items-center gap-2"><span className="text-[#C29845]"><FaBolt /></span> Quick Actions</p>
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <button
+                  onClick={() => { const o = myActive || myAssigned; if (o) openStepModal(o, 0); }}
+                  disabled={!myActive && !myAssigned}
+                  className="h-20 rounded-lg bg-[#0E4230] hover:bg-[#093224] text-white flex flex-col items-center justify-center gap-1.5 text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <FaPlay className="text-sm" /> Start Task
+                </button>
+                <button onClick={quickUploadProof} className="h-20 rounded-lg border border-[#D5DCD5] bg-white hover:bg-[#F4F7F4] text-[#18261F] flex flex-col items-center justify-center gap-1.5 text-xs font-bold transition-colors">
+                  <FaUpload className="text-sm text-[#0F4D38]" /> Upload Proof
+                </button>
+                <button onClick={() => setIsChatOpen(true)} className="h-20 rounded-lg border border-[#D5DCD5] bg-white hover:bg-[#F4F7F4] text-[#18261F] flex flex-col items-center justify-center gap-1.5 text-xs font-bold transition-colors">
+                  <FaCommentDots className="text-sm text-[#0F4D38]" /> Chat Admin
+                </button>
+                <button onClick={() => { markGuideRead(); navigate('/performer-rules'); }} className="h-20 rounded-lg border border-[#D5DCD5] bg-white hover:bg-[#F4F7F4] text-[#18261F] flex flex-col items-center justify-center gap-1.5 text-xs font-bold transition-colors">
+                  <FaScroll className="text-sm text-[#C29845]" /> Read Guide
+                </button>
               </div>
+            </section>
+            {/* How It Works */}
+            <section className="bg-white border border-[#E1E7E1] rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+              <p className="text-sm font-bold text-[#18261F]">How It Works</p>
+              <ol className="mt-3 space-y-3">
+                {[
+                  'Press Start Task — Step 1 unlocks.',
+                  'Perform the step, then tap Complete + Proof (photo / video / message + GPS).',
+                  'Steps open one by one — Step 2 waits for Step 1, and a done step locks forever.',
+                  "Tawaf, Sa'i and Rami need their 7x counter here.",
+                  'Every photo passes the AI reference check (min 60%) before the step locks.',
+                ].map((t, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-[#0F4D38] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                    <span className="text-[12.5px] leading-snug text-[#414E46]">{t}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          </aside>
+        )}
+        </div>
 
-              {/* How It Works (one step at a time) */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-md font-bold text-gray-800 mb-3 border-b pb-2 flex items-center gap-2"><FaInfoCircle className="text-primary" /> How It Works</h3>
-                <ol className="mt-1 space-y-2 text-[11px] text-gray-600 leading-snug">
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">1</span> Press Start Task — Step 1 unlocks.</li>
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">2</span> Perform the step, then tap Complete + Proof (photos / video / message + GPS).</li>
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">3</span> Steps open one by one — Step 2 waits for Step 1, and a done step locks forever.</li>
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">4</span> Tawaf, Sa&apos;i and Rami need their 7x counter first.</li>
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">5</span> Every photo passes the AI reference check (min {AI_MATCH_MIN}%) before the step locks.</li>
-                  <li className="flex gap-2"><span className="w-4 h-4 rounded-full bg-primary text-white text-[9px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">6</span> The sponsor sees every proof live on the tracking page.</li>
-                </ol>
-                <div className="mt-3 bg-green-50 border border-green-100 rounded-lg p-2.5">
-                  <p className="text-[10px] text-green-700 font-bold leading-snug"><FaMapMarkerAlt className="inline mr-1" /> The task map is always unlocked for performers — no payment needed anywhere in this portal.</p>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Level + points mini card */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-md font-bold text-gray-800 mb-3 border-b pb-2 flex items-center gap-2"><FaCrown className="text-accent" /> Level &amp; Points</h3>
-                <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-extrabold text-sm flex-shrink-0 shadow-inner" style={{ backgroundColor: lvl.color }}>
-                    {lvl.name.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-extrabold text-gray-800 text-sm">{lvl.name} Performer</p>
-                    <p className="text-[11px] text-gray-500 font-bold">{totalPoints.toLocaleString()} points</p>
-                    <p className="text-[10px] text-gray-400">{nextLvl ? `${(nextLvl.min - totalPoints).toLocaleString()} to ${nextLvl.name}` : 'Top tier reached'}</p>
-                  </div>
-                </div>
-                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-3">
-                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${lvlProgress}%`, backgroundColor: lvl.color }}></div>
-                </div>
-                <p className="text-[9px] text-gray-400 mt-1.5 leading-snug">High points = priority queue, premium tasks and the {Math.round(SHARE * 100)}% payout tier.</p>
-              </div>
-
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-md font-bold text-gray-800 mb-4 border-b pb-2">Performer Stats</h3>
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Total Earnings</span><span className="font-bold text-green-600">PKR {totalEarnings.toLocaleString()}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Donation Tasks</span><span className="font-bold text-purple-600 text-xs inline-flex items-center gap-1"><FaLock /> Price Hidden</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Tasks Completed</span><span className="font-bold text-gray-800">{myCompleted.length}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Active Task</span><span className="font-bold text-blue-600">{activeTask ? activeTask.serviceType : 'None'}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Availability</span><span className={`font-bold ${acceptingTasks ? 'text-green-600' : 'text-red-500'}`}>{acceptingTasks ? 'Available' : isBusy ? 'Busy' : 'Unavailable'}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Performance Score</span><span className="font-bold text-blue-600">{perfScore == null ? '—' : `${perfScore}/100`}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-gray-500">Activity Streak</span><span className="font-bold text-accent flex items-center gap-1"><FaFire /> {streak.count} day(s)</span></div>
-                </div>
-                <div className="mt-4 bg-gray-50 rounded-xl p-3 border border-gray-100">
-                  <p className="text-[10px] text-gray-400 leading-relaxed">
-                    <FaLock className="inline mr-1" />Each guided step needs its proof (photo / video / message + GPS). The order is automatically marked "Completed" once all milestones are done.
-                  </p>
-                </div>
-              </div>
-            </>
-          )}
-        </aside>
       </div>
+
+      {/* ===== v7.2 LIVE LOCATION PAGE (separate page — the Location button opens this) ===== */}
+      {mapOpen && (
+        <div className="fixed inset-0 z-[70] bg-[#FAFBF9] flex flex-col">
+          <header className="bg-white border-b border-[#E5E9E4] h-16 flex items-center justify-between px-4 md:px-6 flex-shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <button onClick={() => setMapOpen(false)} className="w-9 h-9 rounded-full border border-[#E3E8E3] bg-white flex items-center justify-center text-[#0F4D38] hover:bg-gray-50 transition-colors flex-shrink-0" title="Back to portal">
+                <FaArrowLeft />
+              </button>
+              <div className="min-w-0">
+                <h2 className="font-serif text-xl md:text-2xl text-[#163D2E] leading-tight truncate">Your live location</h2>
+                <p className="text-[11px] text-[#69786F] leading-tight">This is you — standing here. Every proof you upload carries this same GPS pin.</p>
+              </div>
+            </div>
+            <span className={`hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0 ${pageGeo === 'on' ? 'bg-[#0F4D38] text-white' : 'bg-white border border-[#D5DCD5] text-[#55635B]'}`}>
+              <span className={`w-2 h-2 rounded-full ${pageGeo === 'on' ? 'bg-[#7FD1A8] animate-pulse' : 'bg-[#C68520]'}`}></span>
+              {pageGeo === 'on' ? 'Location on' : 'Location off'}
+            </span>
+          </header>
+
+          <div className="flex-1 relative min-h-0">
+            {mapCoords ? (
+              <>
+                <iframe
+                  title="Live location map"
+                  className="absolute inset-0 w-full h-full border-0"
+                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${(mapCoords.lng - 0.006).toFixed(6)}%2C${(mapCoords.lat - 0.004).toFixed(6)}%2C${(mapCoords.lng + 0.006).toFixed(6)}%2C${(mapCoords.lat + 0.004).toFixed(6)}&layer=mapnik&marker=${mapCoords.lat.toFixed(6)}%2C${mapCoords.lng.toFixed(6)}`}
+                />
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white rounded-full shadow-lg border border-[#E3E8E3] px-4 py-2 flex items-center gap-2 max-w-[92%]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#257657] animate-pulse flex-shrink-0"></span>
+                  <span className="text-xs font-extrabold text-[#18261F] whitespace-nowrap">You are here</span>
+                  <span className="text-[11px] text-[#69786F] truncate">{mapCoords.lat.toFixed(5)}, {mapCoords.lng.toFixed(5)} · ±{mapCoords.acc} m</span>
+                </div>
+              </>
+            ) : mapError ? (
+              <div className="absolute inset-0 flex items-center justify-center p-6">
+                <div className="bg-white rounded-2xl border border-[#E3E8E3] shadow-sm p-6 max-w-sm text-center">
+                  <FaMapMarkerAlt className="text-3xl text-[#C68520] mx-auto" />
+                  <p className="text-sm font-extrabold text-[#18261F] mt-3">Location is off</p>
+                  <p className="text-xs text-[#55635B] mt-1.5 leading-relaxed">{mapError}</p>
+                  <button onClick={fetchMapLocation} className="mt-4 bg-[#0E4230] hover:bg-[#093224] text-white text-xs font-extrabold px-6 py-2.5 rounded-xl inline-flex items-center gap-2 transition-colors">
+                    <FaSyncAlt /> Retry
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <span className="inline-block w-10 h-10 border-4 border-[#0F4D38] border-t-transparent rounded-full animate-spin"></span>
+                  <p className="text-sm font-bold text-[#18261F] mt-3">{mapLocating ? 'Finding your position…' : 'Preparing the map…'}</p>
+                  <p className="text-xs text-[#69786F] mt-1">Allow location access in the browser prompt if it appears.</p>
+                </div>
+              </div>
+            )}
+            {mapCoords && (
+              <button onClick={fetchMapLocation} className="absolute top-4 right-4 bg-white border border-[#E3E8E3] rounded-full shadow-sm px-3.5 py-2 text-xs font-extrabold text-[#0F4D38] hover:bg-gray-50 inline-flex items-center gap-1.5 transition-colors">
+                <FaSyncAlt className={mapLocating ? 'animate-spin' : ''} /> Refresh position
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== FOOTER (dark green mockup: support + legal + tagline) ===== */}
+      <footer className="bg-[#093527] text-white pt-12 pb-7 border-t border-[#0e4835] mt-auto">
+        <div className="max-w-[1240px] mx-auto px-4 md:px-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-10">
+            <div className="md:col-span-6">
+              <div className="text-xl font-bold tracking-tight mb-3">
+                <span className="text-white">Ibadah</span><span className="text-[#CBA048]">Connect</span>
+              </div>
+              <p className="text-sm text-[#9BB1A5] max-w-sm leading-relaxed">Performer portal. Every proof you upload is seen by the sponsor live.</p>
+            </div>
+            <div className="md:col-span-3">
+              <h3 className="text-sm font-semibold text-white mb-4">Support</h3>
+              <ul className="space-y-2.5 text-sm text-[#9BB1A5]">
+                <li><button onClick={() => setIsChatOpen(true)} className="hover:text-white transition-colors">Message admin</button></li>
+                <li><a href="https://wa.me/923390138178" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">WhatsApp +92 339 0138178</a></li>
+                <li><button onClick={() => { markGuideRead(); navigate('/performer-rules'); }} className="hover:text-white transition-colors">Performer guide</button></li>
+              </ul>
+            </div>
+            <div className="md:col-span-3">
+              <h3 className="text-sm font-semibold text-white mb-4">Legal</h3>
+              <ul className="space-y-2.5 text-sm text-[#9BB1A5]">
+                <li><a href="#" onClick={(e) => e.preventDefault()} className="hover:text-white transition-colors">Privacy policy</a></li>
+                <li><a href="#" onClick={(e) => e.preventDefault()} className="hover:text-white transition-colors">Terms of service</a></li>
+                <li><a href="#" onClick={(e) => e.preventDefault()} className="hover:text-white transition-colors">Refund policy</a></li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-[#154637] pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-[#7B9588]">
+            <div>&copy; {new Date().getFullYear()} IbadahConnect. Your amanah, our responsibility.</div>
+            <div className="mt-2 sm:mt-0">Portal v7.6 — Pakistan to Makkah</div>
+          </div>
+        </div>
+      </footer>
 
       {/* ================= STEP PROOF MODAL (v6.0 — step-aware: message + photos + receipt + video + GPS + AI check) ================= */}
       {proofModal && modalStep && (
@@ -3086,7 +3325,7 @@ const PerformerDashboard = () => {
       {withdrawOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setWithdrawOpen(false)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-[#1B5E20] to-[#0a1a14] text-white p-4 flex justify-between items-center">
+            <div className="bg-[#0F4D38] text-white p-4 flex justify-between items-center">
               <h3 className="font-bold flex items-center gap-2"><FaMoneyCheckAlt /> Request Withdrawal</h3>
               <button onClick={() => setWithdrawOpen(false)} className="hover:bg-white/20 p-1 rounded-full"><FaTimesCircle /></button>
             </div>

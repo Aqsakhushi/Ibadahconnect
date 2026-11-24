@@ -1,13 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "../api";
+import { saveAuth as storeAuth } from "../utils/auth";
 import {
   FaGoogle, FaApple, FaEye, FaEyeSlash, FaCheck, FaTimes, FaKaaba,
   FaHandHoldingHeart, FaGraduationCap, FaCheckCircle, FaInfoCircle,
   FaShieldAlt, FaHeart, FaPlane,
 } from "react-icons/fa";
-
-const API = "http://localhost:5000"; // backend ka URL (agar port alag ho to yahan change karna)
 
 /* ================= CONSTANTS ================= */
 
@@ -105,7 +104,6 @@ export default function AuthModal(props) {
   } = props;
 
   const navigate = useNavigate();
-  const [selfOpen, setSelfOpen] = useState(false);
   const [tab, setTab] = useState("register");
 
   const controlled = open ?? isOpen ?? show ?? showModal ?? visibleProp ?? null;
@@ -164,14 +162,13 @@ export default function AuthModal(props) {
   const [otpInput, setOtpInput] = useState("");
   const [otpVerified, setOtpVerified] = useState(false);
 
-  const closeAll = () => {
-    setSelfOpen(false);
+  const closeAll = useCallback(() => {
     setSuccess(null);
     setNotice("");
     [onClose, onCloseModal, closeModal, hideModal, setShowModal, setShow, setIsOpen, setShowAuth].forEach((fn2) => {
       if (typeof fn2 === "function") fn2(false);
     });
-  };
+  }, [onClose, onCloseModal, closeModal, hideModal, setShowModal, setShow, setIsOpen, setShowAuth]);
 
   /* FIX #3: login ke baad kahan bhejna hai
      1) sessionStorage.postLoginRedirect (CartPage set karegi)  → wahin jao
@@ -184,7 +181,7 @@ export default function AuthModal(props) {
         sessionStorage.removeItem("postLoginRedirect");
         return stored;
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* storage may be unavailable */ }
     const p = openPathRef.current || "/";
     const stay = ["/cart", "/checkout", "/wishlist", "/track", "/track-order", "/profile", "/personal-info", "/faq"];
     if (stay.some((s) => p === s || p.startsWith(s + "/"))) return p;
@@ -193,11 +190,7 @@ export default function AuthModal(props) {
 
   const saveAuth = (rawUser, token) => {
     const user = normalizeUser(rawUser || {});
-    localStorage.setItem("user", JSON.stringify(user));
-    if (token) {
-      localStorage.setItem("ibadahToken", token); // axios interceptor isi ko parhta hai
-      localStorage.setItem("token", token);
-    }
+    storeAuth(user, token);
     return user;
   };
 
@@ -212,7 +205,7 @@ export default function AuthModal(props) {
     }
     const t = setTimeout(() => setSuccess((s) => ({ ...s, countdown: s.countdown - 1 })), 1000);
     return () => clearTimeout(t);
-  }, [success]);
+  }, [success, closeAll, navigate]);
 
   /* ---------- handlers ---------- */
 
@@ -224,7 +217,7 @@ export default function AuthModal(props) {
     if (!lpw) return setLoginErr("Please enter your password.");
     setBusy(true);
     try {
-      const res = await axios.post(`${API}/api/auth/login`, { email: lem.trim(), password: lpw });
+      const res = await API.post('/auth/login', { email: lem.trim(), password: lpw });
       const { user: rawUser, token } = extractAuth(res.data);
       if (!rawUser) throw new Error("No user in response");
       const user = saveAuth(rawUser, token);
@@ -283,10 +276,10 @@ export default function AuthModal(props) {
         hasIdDoc: !!idDoc,
         hasProfilePhoto: !!photo,
       };
-      const sRes = await axios.post(`${API}/api/auth/signup`, payload);
+      const sRes = await API.post('/auth/register', payload);
       let { user: rawUser, token } = extractAuth(sRes.data);
       if (!token) {
-        const res = await axios.post(`${API}/api/auth/login`, { email: rem.trim(), password: rpw });
+        const res = await API.post('/auth/login', { email: rem.trim(), password: rpw });
         const lAuth = extractAuth(res.data);
         rawUser = lAuth.user || rawUser;
         token = lAuth.token;
@@ -314,10 +307,10 @@ export default function AuthModal(props) {
     try {
       let res;
       try {
-        res = await axios.post(`${API}/api/auth/login`, creds);
-      } catch (e1) {
+        res = await API.post('/auth/login', creds);
+      } catch {
         // pehli dafa — demo Google account banao, phir login karo
-        await axios.post(`${API}/api/auth/signup`, {
+        await API.post('/auth/register', {
           name: DEMO_GOOGLE.name,
           firstName: "Google",
           lastName: "User",
@@ -327,7 +320,7 @@ export default function AuthModal(props) {
           country: "Pakistan",
           phone: "+923000000000",
         });
-        res = await axios.post(`${API}/api/auth/login`, creds);
+        res = await API.post('/auth/login', creds);
       }
       const { user: rawUser, token } = extractAuth(res.data);
       if (!rawUser) throw new Error("No user in response");

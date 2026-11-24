@@ -20,6 +20,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { JWT_SECRET } = require('../config/env');
 const jwt = require('jsonwebtoken');
 
 const Order = require('../models/Order');
@@ -42,7 +43,7 @@ async function protect(req, res, next) {
     if (!token) return res.status(401).json({ message: 'Not authorized — token missing' });
     let payload;
     try {
-      payload = jwt.verify(token, process.env.JWT_SECRET || 'ibadah_secret');
+      payload = jwt.verify(token, JWT_SECRET);
     } catch (e) {
       return res.status(401).json({ message: 'Not authorized — invalid token' });
     }

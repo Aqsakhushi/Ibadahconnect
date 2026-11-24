@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { FaTimes, FaPaperPlane, FaComments } from 'react-icons/fa';
 import API from '../api';
 import { getCurrentUser } from '../utils/auth';
@@ -14,20 +14,20 @@ export default function OrderChat({ orderId, orderCode, onClose }) {
   const [sending, setSending] = useState(false);
   const bodyRef = useRef(null);
 
-  const load = async () => {
+  const load = useCallback(async (silent = false) => {
     try {
-      const res = await API.get(`/chat/${orderId}`);
+      const res = await API.get(`/chat/${orderId}`, { skipAuthRedirect: silent });
       setMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
     } catch (e) {
       console.error('Chat load failed:', e.message);
     }
-  };
+  }, [orderId]);
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 4000); // live polling every 4s
+    const t = setInterval(() => load(true), 4000); // live polling every 4s
     return () => clearInterval(t);
-  }, [orderId]);
+  }, [load]);
 
   useEffect(() => {
     const el = bodyRef.current;

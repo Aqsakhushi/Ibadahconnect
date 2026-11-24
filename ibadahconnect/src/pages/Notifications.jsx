@@ -1,27 +1,6 @@
 import { useState, useEffect } from 'react';
-
-/* Universal token helper */
-const getToken = () => {
-  try {
-    const direct = ['token', 'authToken', 'accessToken', 'jwt'];
-    for (const store of [localStorage, sessionStorage]) {
-      for (const k of direct) {
-        const v = store.getItem(k);
-        if (v && !v.startsWith('{')) return v;
-      }
-      for (let i = 0; i < store.length; i++) {
-        const k = store.key(i);
-        try {
-          const raw = store.getItem(k);
-          if (!raw || !raw.startsWith('{')) continue;
-          const obj = JSON.parse(raw);
-          if (obj && obj.token) return obj.token;
-        } catch (e) {}
-      }
-    }
-  } catch (e) {}
-  return '';
-};
+import API from '../api';
+import { getToken } from '../utils/auth';
 
 const READ_KEY = 'ic_read_notifs';
 const getRead = () => { try { return JSON.parse(localStorage.getItem(READ_KEY)) || []; } catch (e) { return []; } };
@@ -83,23 +62,27 @@ const buildNotifications = (orders) => {
 
 const Notifications = () => {
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(getToken()));
   const [read, setRead] = useState(getRead());
   const [filter, setFilter] = useState('all');
   const token = getToken();
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
+    if (!token) return;
+    let active = true;
     (async () => {
       try {
-        const res = await fetch('/api/orders/mine', { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
+        const { data } = await API.get('/orders/mine');
         const orders = Array.isArray(data) ? data : data.orders || [];
-        setItems(buildNotifications(orders));
-      } catch (e) {}
-      setLoading(false);
+        if (active) setItems(buildNotifications(orders));
+      } catch (requestError) {
+        console.error('Could not load notifications:', requestError.message);
+      } finally {
+        if (active) setLoading(false);
+      }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [token]);
 
   const unread = items.filter((n) => !read.includes(n.id));
 

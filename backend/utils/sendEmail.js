@@ -1,9 +1,17 @@
 ﻿/* ============================================================
-   IbadahConnect — utils/sendEmail.js (v5)
+   IbadahConnect — utils/sendEmail.js (v6)
    - Professional branded verification email (SHEIN-style layout)
    - Lazy transporter (fresh creds per send — stale bug khatam)
    - Sahi .env path (backend/.env) + multi-name fallbacks
    - Compat exports: require() default + destructuring dono chalein
+   CHANGELOG v6 (noise + token=undefined fixes):
+   - 4-line [DEV FALLBACK] banner removed — tha HAR verification pe,
+     chahe email sahi gayi ho. Ab: email gayi to sirf 1 ✅ line;
+     email nahi gayi to 1 compact [VERIFY LINK] line (testing na rukey).
+   - Network/DNS errors throttled: 10 min me sirf 1 short warning.
+   - Recipient guard: khali/invalid "to" pe send skip (No recipients
+     defined error ab possible hi nahi).
+   - token missing ho to link me "token=undefined" nahi banta.
    ============================================================ */
 
 const path = require('path');
@@ -31,6 +39,28 @@ const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const EMAIL_FROM =
   process.env.EMAIL_FROM || 'IbadahConnect <' + (SMTP_USER || 'noreply@ibadahconnect.com') + '>';
 const BASE_URL = process.env.BASE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+
+/* ---------- LOG THROTTLE (same pattern as orders.js / auth.js) -------- */
+const _logOnce = new Map();
+function logOnce(key, msg, ttlMs = 10 * 60 * 1000) {
+  const now = Date.now();
+  const last = _logOnce.get(key) || 0;
+  if (now - last < ttlMs) return;
+  _logOnce.set(key, now);
+  console.log(msg);
+}
+
+/* ---------- NETWORK ERROR? (Wi-Fi off / DNS / Gmail unreachable) ------ */
+function isNetworkError(err) {
+  if (!err) return false;
+  const code = err.code || '';
+  const msg = String(err.message || '');
+  return (
+    ['ENETUNREACH', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ESOCKET']
+      .includes(code) ||
+    /timeout|TLS|greeting/i.test(msg)
+  );
+}
 
 /* ------------------------- EMAIL HTML TEMPLATE ------------------------- */
 
@@ -97,9 +127,20 @@ function buildVerifyHtml({ name, verifyUrl }) {
 
 async function sendMailSafe({ to, subject, html, text }) {
   if (!SMTP_USER || !SMTP_PASS) {
-    console.log('[EMAIL] SMTP creds missing — sirf dev fallback use hoga.');
+    logOnce(
+      'email-creds',
+      '[EMAIL] SMTP creds missing (.env) — email skip, verify link console me aa raha hai.'
+    );
     return { success: false, dev: true };
   }
+
+  // Recipient guard — "No recipients defined" ab kabhi throw hi nahi hoga
+  const safeTo = String(to || '').trim();
+  if (!/^\S+@\S+\.\S+$/.test(safeTo)) {
+    logOnce('email-no-recipient', '[EMAIL] Recipient email missing/invalid — email skipped, app flow unaffected.');
+    return { success: false, error: new Error('No recipients defined') };
+  }
+
   try {
     // Fresh transporter per send — koi stale credentials bug possible nahi
     const transporter = nodemailer.createTransport({
@@ -107,15 +148,24 @@ async function sendMailSafe({ to, subject, html, text }) {
       port: SMTP_PORT,
       secure: SMTP_PORT === 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
-      connectionTimeout: 20000,
-      greetingTimeout: 15000,
-      socketTimeout: 30000,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     });
-    const info = await transporter.sendMail({ from: EMAIL_FROM, to, subject, html, text });
-    console.log('[EMAIL] ✅ Sent to ' + to + '  (id: ' + info.messageId + ')');
+    await transporter.sendMail({ from: EMAIL_FROM, to: safeTo, subject, html, text });
+    console.log('[EMAIL] ✅ Sent to ' + safeTo);
     return { success: true };
   } catch (err) {
-    console.log('[EMAIL] SEND ERROR: ' + (err.message || err));
+    if (isNetworkError(err)) {
+      // Wi-Fi off / DNS issue / Gmail down — 10 min me sirf 1 dafa short warning
+      logOnce('email-net', '[EMAIL] Gmail SMTP abhi reachable nahi (network/DNS) — email skipped, app flow unaffected.');
+    } else {
+      // Real config problem (wrong password etc.) — per-error ek dafa
+      logOnce(
+        'email-err-' + String(err.code || err.message || 'unknown').slice(0, 60),
+        '[EMAIL] Send failed: ' + (err.message || err)
+      );
+    }
     return { success: false, error: err };
   }
 }
@@ -135,14 +185,15 @@ async function sendVerificationEmail(userOrPayload, tokenArg) {
     user = { email: userOrPayload };
   }
 
-  const to = user.email || userOrPayload || '';
+  const to = user.email || (typeof userOrPayload === 'string' ? userOrPayload : '') || '';
   const name = user.firstName || user.name || 'User';
-  const verifyUrl = BASE_URL + '/verify-email?token=' + token;
 
-  console.log('========================================================');
-  console.log('[DEV FALLBACK] VERIFICATION LINK:');
-  console.log(verifyUrl);
-  console.log('========================================================');
+  // FIX (token=undefined): token na ho to link me "token=undefined" nahi jayega
+  const safeToken = token ? String(token) : '';
+  if (!safeToken) {
+    logOnce('verify-token-missing', '[EMAIL] Verification token missing — link bina token ke hai.');
+  }
+  const verifyUrl = BASE_URL + '/verify-email' + (safeToken ? '?token=' + safeToken : '');
 
   const html = buildVerifyHtml({ name, verifyUrl });
   const text =
@@ -156,6 +207,13 @@ async function sendVerificationEmail(userOrPayload, tokenArg) {
     html,
     text,
   });
+
+  // Email nahi gayi (creds missing ya network down) — link console pe,
+  // ek compact line, taake dev/testing flow kabhi na rukey.
+  if (!result.success) {
+    console.log('[VERIFY LINK] ' + verifyUrl);
+  }
+
   return { dev: true, ...result };
 }
 

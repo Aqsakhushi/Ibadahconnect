@@ -5,6 +5,7 @@ const axios = require('axios');
 const { createWorker } = require('tesseract.js');
 const path = require('path');
 const fs = require('fs');
+const { JWT_SECRET } = require('../config/env');
 
 // ============================================================
 // OCR PROOF VERIFICATION (Meeting Requirement #1)
@@ -20,7 +21,7 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ message: 'Login required — token nahi mila.' });
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ibadahsecret');
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
@@ -125,6 +126,17 @@ function analyzeText(rawText, serviceType, amount) {
 
   return { matched, score, suggestion };
 }
+
+// Reference-image matching is not implemented. Return an explicit manual-review
+// result instead of manufacturing a confidence percentage.
+router.post('/ai-match', requireAuth, (req, res) => {
+  res.json({
+    available: false,
+    manualReview: true,
+    matchPercent: null,
+    message: 'AI reference matching is unavailable. This proof will be reviewed manually.',
+  });
+});
 
 // ---- ROUTE: POST /api/proof/ocr-check ----
 router.post('/ocr-check', requireAuth, async (req, res) => {

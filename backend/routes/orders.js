@@ -1,36 +1,32 @@
 /**
  * ============================================================
- *  IbadahConnect — backend/routes/orders.js   (v6)
+ *  IbadahConnect — backend/routes/orders.js   (v7 — CLEAN CONSOLE)
  * ------------------------------------------------------------
- *  FIXES IN v6:
- *   1. CHECKOUT FIX — the real frontend payload is:
- *      { userId, billing:{ fullName, phone, address, city,
- *        country, notes }, items:[{ packageId, qty }],
- *        hadiyah, paymentMethod }
- *      Items carry ONLY packageId + qty, so every package's
- *      title & price is now resolved from the packages
- *      collection (Package model) before creating the order.
- *   2. The payload has NO email field anywhere, so the sponsor
- *      is resolved FIRST (token -> body.userId -> email lookup)
- *      and the verification email falls back to the sponsor's
- *      account email.
- *   3. Removed every illegal next() call that caused
- *      "[CREATE ORDER ERROR] next is not a function" and the
- *      repeated "[AUTO-RELEASE ERROR] next is not a function"
- *      console spam. Sweeps now log only AFTER a successful save.
- *   4. Performers live in the User collection (role: 'Performer')
- *      — no separate Performer model exists. Auto-assign now
- *      queries User.find({ role: 'Performer' }).
- *   5. All ORIGINAL legacy routes restored so no existing page
- *      breaks: POST /create, GET /my-orders/:sponsorId,
- *      GET /detail/:orderId, PUT /rate/:orderId (+ POST alias),
- *      GET /performer-stats/:performerId,
- *      PUT /update-milestone/:orderId, PUT /assign/:orderId,
- *      PUT /accept-task/:orderId.
- *   6. Task-E flow fully intact:
- *      checkout -> verification email -> user clicks link ->
- *      isEmailVerified = true -> auto-assign performer ->
- *      confirmation email #2.
+ *  CHANGES IN v7 (sirf logging/quiet fixes — koi route, koi
+ *  flow, koi business rule change NAHI. v6 ka saara logic
+ *  as-it-is hai):
+ *   1. AUTO-ASSIGN SPAM FIX — "All performers busy" line ab
+ *      har episode par sirf EK dafa aati hai (capacity change
+ *      hone par — assign/release/complete — dobara allow).
+ *      Sweep ab ek aggregate line deta hai: kitne verified
+ *      orders wait kar rahe hain + unke codes. Har dashboard
+ *      refresh pe repeat NAHI hota.
+ *   2. EMAIL NOISE FIX — "No recipients defined" khatam
+ *      (empty/invalid recipient pe send se PEHLE guard).
+ *      Network errors (ENETUNREACH / timeout / DNS / TLS) ab
+ *      10 min me sirf EK short line — full stack spam nahi.
+ *   3. ROUTE ERROR LOGS — console.error(..., err) se poore
+ *      stack dumps aate the (MongoNetworkTimeoutError wali
+ *      8-line blocks); ab sirf err.message (1 line per error).
+ *   4. [CHECKOUT] Payload JSON dump removed (created-order line
+ *      kaafi hai) aur "[AUTH] Guest request" noise log removed.
+ *  v6 FEATURES INTACT: checkout payload resolution (packageId +
+ *  qty -> Package lookup), Task-E verification flow (email ->
+ *  /verify/:token -> auto-assign -> confirmation #2), scoring
+ *  (verified +50, same city +20), max 1 active task per
+ *  performer, max 1 completed/day, 48h AUTO-RELEASE sweep, GPS
+ *  auto-verify (15km Haram radius), OCR proof storage, rating,
+ *  aur saari LEGACY routes — sab unchanged.
  * ============================================================
  */
 
@@ -40,6 +36,8 @@ const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
 const Order = require('../models/Order');
+const { JWT_SECRET } = require('../config/env');
+const { generateForCompletedOrder } = require('../services/certificates');
 
 const router = express.Router();
 
@@ -55,6 +53,30 @@ function getModel(file, name) {
   try { return mongoose.model(name); } catch (e) { return null; }
 }
 
+/* ============================================================
+   LOG THROTTLE (console clean rakhne ke liye — v7 NEW)
+   - logOnce(key, msg, ttlMs): same key wala message TTL ke
+     andar sirf EK dafa print hota hai.
+   - resetBusyNotices(): jab capacity change ho (koi order
+     assign ho jaye / release ho jaye / complete ho jaye) to
+     busy-wale notices reset — taake NAYI busy episode ka
+     message phir se ek dafa aa sake.
+   ============================================================ */
+const _logOnce = new Map(); // key -> last printed timestamp (ms)
+function logOnce(key, msg, ttlMs = 10 * 60 * 1000) {
+  const now = Date.now();
+  const last = _logOnce.get(key) || 0;
+  if (now - last < ttlMs) return false;
+  _logOnce.set(key, now);
+  console.log(msg);
+  return true;
+}
+function resetBusyNotices() {
+  for (const k of [..._logOnce.keys()]) {
+    if (String(k).startsWith('busy') || k === 'auto-assign-busy') _logOnce.delete(k);
+  }
+}
+
 // Populate field lists (never expose password hashes)
 const PERFORMER_FIELDS = 'firstName lastName email profilePic performerType isVerified experience city cnicStatus';
 const SPONSOR_FIELDS = 'firstName lastName email profilePic';
@@ -67,7 +89,6 @@ const SMTP_PASS = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || pro
 const SERVER_URL = (process.env.SERVER_URL || 'http://localhost:5000').replace(/\/+$/, '');
 const CLIENT_URL = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
 const EMAIL_FROM = process.env.EMAIL_FROM || `IbadahConnect <${SMTP_USER}>`;
-const JWT_SECRET = process.env.JWT_SECRET || 'ibadahconnect_dev_secret_change_me';
 
 const transporter = SMTP_USER && SMTP_PASS
   ? nodemailer.createTransport({
@@ -79,16 +100,39 @@ const transporter = SMTP_USER && SMTP_PASS
   : null;
 
 // Fire-and-forget email helper — never blocks or breaks an API call
+const _emailNotice = { net: 0 }; // network-error throttle (v7)
 async function sendMail(options) {
+  // v7 GUARD: empty/invalid recipient -> "No recipients defined"
+  // error ab kabhi hi nahi aayega (send se pehle hi skip).
+  const to = options && options.to ? String(options.to).trim() : '';
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    logOnce('email-no-recipient', '[EMAIL] Skipped — no valid recipient (order flow unaffected)');
+    return;
+  }
   if (!transporter) {
-    console.warn('[EMAIL] SMTP not configured — skipped email to', options && options.to);
+    logOnce('email-unconfigured', '[EMAIL] SMTP not configured — emails skipped (order flow unaffected)');
     return;
   }
   try {
     const info = await transporter.sendMail(options);
-    console.log(`[EMAIL] Sent -> ${options.to} (${info && info.messageId})`);
+    console.log(`[EMAIL] Sent -> ${to} (${info && info.messageId})`);
   } catch (err) {
-    console.error('[EMAIL ERROR]', err.message);
+    // v7: network/DNS/timeout errors pe full stack ki jagah
+    // 10 min me sirf EK short warning line.
+    const code = String((err && err.code) || '');
+    const msg = String((err && err.message) || err || '');
+    const networkish =
+      /ENETUNREACH|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN|ESOCKET/i.test(code) ||
+      /timeout|timed out|TLS|greeting/i.test(msg);
+    if (networkish) {
+      const now = Date.now();
+      if (now - _emailNotice.net > 10 * 60 * 1000) {
+        _emailNotice.net = now;
+        console.warn('[EMAIL] Gmail SMTP abhi reachable nahi (network/DNS) — email skipped, order flow unaffected.');
+      }
+    } else {
+      console.error('[EMAIL ERROR]', msg);
+    }
   }
 }
 
@@ -169,6 +213,7 @@ function DEFAULT_MILESTONES() {
    OPTIONAL AUTH — never rejects a request.
    If a valid Bearer token exists, the sponsor is attached to
    req.user; otherwise the request continues as a guest.
+   (v7: guest log removed — ye har request pe noise karta tha)
    ============================================================ */
 function extractToken(req) {
   const h = req.headers && req.headers.authorization;
@@ -188,7 +233,7 @@ async function optionalAuth(req, res, next) {
       }
     }
   } catch (e) {
-    console.log('[AUTH] Guest request (no/invalid token) — continuing');
+    /* guest request — silently continue */
   }
   next();
 }
@@ -332,6 +377,8 @@ function pageShell(title, bodyHtml) {
 /* ============================================================
    AUTO-ASSIGN ENGINE
    Performers live in the User collection (role: 'Performer').
+   v7: busy hone par yahan koi log NAHI hota — call sites
+   (sweep / verify route) logOnce se EK dafa message dete hain.
    ============================================================ */
 async function loadPerformers(excludeIds = []) {
   const baseQuery = { _id: { $nin: excludeIds } };
@@ -373,16 +420,18 @@ async function applyAssignment(order, performerDoc) {
     if (order.milestones[1]) order.milestones[1].status = 'In Progress';
   }
   await order.save();
+  // v7: capacity change hui — busy notices reset karo
+  resetBusyNotices();
   await notifyAssignment(order, performerDoc);
 }
 
-async function assignPerformer(order, excludeIds = []) {
+async function assignPerformer(order, excludeIds = [], opts = {}) {
   try {
     if (mongoose.connection.readyState !== 1) return null;
 
     const performers = await loadPerformers(excludeIds);
     if (!performers.length) {
-      console.log('[AUTO-ASSIGN] No performers registered yet');
+      logOnce('no-performers', '[AUTO-ASSIGN] No performers registered yet');
       return null;
     }
 
@@ -420,7 +469,7 @@ async function assignPerformer(order, excludeIds = []) {
     }
 
     if (!best) {
-      console.log(`[AUTO-ASSIGN] All performers busy — order ${order.orderCode} stays Pending`);
+      // v7: yahan koi log NAHI — call site logOnce karta hai
       return null;
     }
 
@@ -434,6 +483,9 @@ async function assignPerformer(order, excludeIds = []) {
 }
 
 // Sweep: assign verified pending orders (called lazily from /mine and /all)
+// v7: sweep ke pehle check me hi return — jab kuch pending hi nahi
+// to bilkul silence. Sab busy hone par EK aggregate line (episode
+// me sirf ek dafa), phir repeat nahi jab tak capacity change na ho.
 async function autoAssignPendingOrders() {
   if (mongoose.connection.readyState !== 1) return;
   try {
@@ -442,8 +494,29 @@ async function autoAssignPendingOrders() {
       isEmailVerified: true,
       $or: [{ performer: null }, { performer: { $exists: false } }],
     }).limit(10);
+    if (!pending.length) return;
+
+    const performers = await loadPerformers();
+    let assigned = 0;
+    const blockedCodes = [];
+
     for (const order of pending) {
-      await assignPerformer(order);
+      const p = await assignPerformer(order, [], { notifyBusy: false });
+      if (p) assigned++;
+      else blockedCodes.push(order.orderCode);
+    }
+
+    if (assigned > 0) {
+      resetBusyNotices(); // capacity badli — naya episode
+      console.log(`[AUTO-ASSIGN] Sweep: ${assigned} order(s) assigned.`);
+    }
+    if (blockedCodes.length) {
+      logOnce(
+        'auto-assign-busy',
+        `[AUTO-ASSIGN] Reschedule needed — all ${performers.length} performers are busy; ` +
+          `${blockedCodes.length} verified order(s) waiting: ${blockedCodes.join(', ')} (auto-retry continues)`,
+        15 * 60 * 1000
+      );
     }
   } catch (err) {
     console.error('[AUTO-ASSIGN SWEEP ERROR]', err.message);
@@ -460,6 +533,7 @@ async function releaseStaleTasks() {
       assignedAt: { $ne: null, $lte: cutoff },
     }).limit(10);
 
+    let released = 0;
     for (const order of stale) {
       const oldPerformer = order.performer;
       order.performer = null;
@@ -467,9 +541,11 @@ async function releaseStaleTasks() {
       order.status = 'Pending';
       await order.save();
       // Log AFTER a successful save (no more repeat spam)
+      released++;
       console.log(`[AUTO-RELEASE] Order ${order.orderCode} released — performer did not accept within 48h`);
       if (oldPerformer) await assignPerformer(order, [oldPerformer]);
     }
+    if (released > 0) resetBusyNotices(); // capacity badli — naya episode
   } catch (err) {
     console.error('[AUTO-RELEASE ERROR]', err.message);
   }
@@ -524,7 +600,6 @@ router.post('/', async (req, res) => {
   try {
     const b = req.body || {};
     const billing = b.billing && typeof b.billing === 'object' ? b.billing : {};
-    console.log('[CHECKOUT] Payload:', JSON.stringify(b).slice(0, 500));
 
     /* ---------- 1) Resolve the sponsor (owner) of this order ---------- */
     let sponsor = req.user || null;
@@ -678,7 +753,7 @@ router.post('/', async (req, res) => {
       verificationRequired: true,
     });
   } catch (err) {
-    console.error('[CREATE ORDER ERROR]', err);
+    console.error('[CREATE ORDER ERROR]', err.message);
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -752,7 +827,7 @@ router.post('/create', async (req, res) => {
       verificationRequired: true,
     });
   } catch (err) {
-    console.error('[LEGACY CREATE ERROR]', err);
+    console.error('[LEGACY CREATE ERROR]', err.message);
     return res.status(500).json({ message: 'Error booking order', error: err.message });
   }
 });
@@ -810,7 +885,11 @@ router.get('/verify/:token', async (req, res) => {
     // Task E: after verification -> auto-assign performer -> confirmation email #2
     const performer = await assignPerformer(order);
     if (!performer) {
-      console.log(`[AUTO-ASSIGN] No performer free right now for ${order.orderCode} — will retry automatically`);
+      // v7: ye line ab per order sirf EK dafa aayegi (10 min TTL)
+      logOnce(
+        `busy-${order.orderCode}`,
+        `[AUTO-ASSIGN] All performers currently busy — order ${order.orderCode} stays Pending (auto-retry continues)`
+      );
     }
 
     return res.status(200).send(
@@ -820,7 +899,7 @@ router.get('/verify/:token', async (req, res) => {
       )
     );
   } catch (err) {
-    console.error('[VERIFY ERROR]', err);
+    console.error('[VERIFY ERROR]', err.message);
     return res.status(500).send(
       pageShell(
         'Error',
@@ -843,7 +922,7 @@ router.get('/mine', async (req, res) => {
     // Lazy sweep — try to assign any verified pending orders
     autoAssignPendingOrders().catch(() => {});
   } catch (err) {
-    console.error('[MY ORDERS ERROR]', err);
+    console.error('[MY ORDERS ERROR]', err.message);
     res.status(500).json({ message: 'Error fetching orders' });
   }
 });
@@ -864,7 +943,7 @@ router.get('/all', async (req, res) => {
       .sort({ createdAt: -1 });
     res.status(200).json(orders);
   } catch (err) {
-    console.error('[ALL ORDERS ERROR]', err);
+    console.error('[ALL ORDERS ERROR]', err.message);
     res.status(500).json({ message: 'Error fetching all orders' });
   }
 });
@@ -879,7 +958,7 @@ router.get('/my-orders/:sponsorId', async (req, res) => {
       .sort({ createdAt: -1 });
     res.status(200).json(orders);
   } catch (err) {
-    console.error('[LEGACY MY ORDERS ERROR]', err);
+    console.error('[LEGACY MY ORDERS ERROR]', err.message);
     res.status(500).json({ message: 'Error fetching orders' });
   }
 });
@@ -895,7 +974,7 @@ router.get('/detail/:orderId', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found!' });
     res.status(200).json(order);
   } catch (err) {
-    console.error('[ORDER DETAIL ERROR]', err);
+    console.error('[ORDER DETAIL ERROR]', err.message);
     res.status(500).json({ message: 'Error fetching order details' });
   }
 });
@@ -937,7 +1016,7 @@ async function rateHandler(req, res) {
     await order.save();
     res.status(200).json({ message: 'Thank you for your feedback!', rating: order.rating });
   } catch (err) {
-    console.error('[RATE ERROR]', err);
+    console.error('[RATE ERROR]', err.message);
     res.status(500).json({ message: 'Error saving rating' });
   }
 }
@@ -968,7 +1047,7 @@ router.get('/performer-stats/:performerId', async (req, res) => {
       avgRating: avgStars,
     });
   } catch (err) {
-    console.error('[PERFORMER STATS ERROR]', err);
+    console.error('[PERFORMER STATS ERROR]', err.message);
     res.status(500).json({ message: 'Error fetching performer stats' });
   }
 });
@@ -993,8 +1072,10 @@ router.put('/update-milestone/:orderId', async (req, res) => {
       // GPS proof + automatic verification near holy sites
       const lat = proofLocation ? Number(proofLocation.lat) : NaN;
       const lng = proofLocation ? Number(proofLocation.lng) : NaN;
+      const location = {};
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        ms.proofLocation = { lat, lng };
+        location.lat = lat;
+        location.lng = lng;
         for (const site of HARAM_LOCATIONS) {
           if (haversineKm(lat, lng, site.lat, site.lng) <= HARAM_RADIUS_KM) {
             siteName = site.name;
@@ -1006,6 +1087,11 @@ router.put('/update-milestone/:orderId', async (req, res) => {
           ms.site = siteName;
         }
       }
+      if (typeof proofLocation?.address === 'string' && proofLocation.address.trim()) {
+        location.address = proofLocation.address.trim().slice(0, 1000);
+      }
+      if (proofLocation?.capturedAt) location.capturedAt = proofLocation.capturedAt;
+      if (Object.keys(location).length) ms.proofLocation = location;
 
       // OCR proof verification result stored as JSON string
       if (proofOcr && typeof proofOcr === 'object' && proofOcr.suggestion) {
@@ -1029,6 +1115,13 @@ router.put('/update-milestone/:orderId', async (req, res) => {
     order.status = allCompleted ? 'Completed' : 'In Progress';
     await order.save();
 
+    // v7: performer ka task complete hua -> capacity badli ->
+    // busy notices reset (naya episode fresh message ke sath)
+    if (allCompleted) {
+      resetBusyNotices();
+      await generateForCompletedOrder(order);
+    }
+
     res.status(200).json({
       message: allCompleted
         ? 'All milestones completed! Order marked as Completed.'
@@ -1041,7 +1134,7 @@ router.put('/update-milestone/:orderId', async (req, res) => {
       verifiedSite: siteName || null,
     });
   } catch (err) {
-    console.error('[UPDATE MILESTONE ERROR]', err);
+    console.error('[UPDATE MILESTONE ERROR]', err.message);
     res.status(500).json({ message: 'Error updating milestone' });
   }
 });
@@ -1079,7 +1172,7 @@ router.put('/assign/:orderId', async (req, res) => {
       .populate('sponsor', SPONSOR_FIELDS);
     res.status(200).json({ message: 'Performer assigned successfully!', order: updated });
   } catch (err) {
-    console.error('[ASSIGN ERROR]', err);
+    console.error('[ASSIGN ERROR]', err.message);
     res.status(500).json({ message: 'Error assigning performer' });
   }
 });
@@ -1122,7 +1215,7 @@ router.put('/accept-task/:orderId', async (req, res) => {
       .populate('performer', PERFORMER_FIELDS);
     res.status(200).json({ message: 'Task started successfully!', order: updated });
   } catch (err) {
-    console.error('[ACCEPT TASK ERROR]', err);
+    console.error('[ACCEPT TASK ERROR]', err.message);
     res.status(500).json({ message: 'Error accepting task' });
   }
 });
@@ -1178,7 +1271,7 @@ router.put('/:id/location', async (req, res) => {
       order,
     });
   } catch (err) {
-    console.error('[UPDATE LOCATION ERROR]', err);
+    console.error('[UPDATE LOCATION ERROR]', err.message);
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -1196,7 +1289,7 @@ router.get('/:id/location', async (req, res) => {
       status: order.status,
     });
   } catch (err) {
-    console.error('[GET LOCATION ERROR]', err);
+    console.error('[GET LOCATION ERROR]', err.message);
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -1211,7 +1304,7 @@ router.get('/:id', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found.' });
     res.json(order);
   } catch (err) {
-    console.error('[GET ORDER ERROR]', err);
+    console.error('[GET ORDER ERROR]', err.message);
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });

@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { JWT_SECRET } = require('../config/env');
 
 // ============================================================
 // FILE UPLOAD SYSTEM (Profile Pic + Proof Photos)
@@ -20,7 +21,7 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ message: 'Login required — token nahi mila.' });
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ibadahsecret');
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch {

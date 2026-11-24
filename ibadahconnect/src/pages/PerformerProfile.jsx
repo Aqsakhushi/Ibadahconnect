@@ -33,7 +33,7 @@ export default function PerformerProfile() {
       }
     };
     load();
-  }, [id]);
+  }, [id, uid]);
 
   if (loading) {
     return (

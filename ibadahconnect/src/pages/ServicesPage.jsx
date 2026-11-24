@@ -1,18 +1,4 @@
-// ============================================================
-// IbadahConnect — src/pages/ServicesPage.jsx (NEW FILE)
-// ------------------------------------------------------------
-// NETFLIX-STYLE CATALOG (Ma'am ki demand):
-//   - Sticky instant search (300ms debounce + URL sync ?q=&cat=)
-//   - Seasonal spotlight hero (Ramadan/Hajj/Eid auto)
-//   - Category chips (All / Umrah / Hajj / 5 donation groups)
-//   - Horizontal rows: scroll-snap + hover arrows + no scrollbar
-//   - ServiceCard: 16:9 image, hover reveal, My List heart,
-//     Popular badge + Netflix-style top-5 rank numbers
-//   - Rows: Saved -> Popular -> Umrah -> Hajj -> 5 sub-category
-//     rows -> Under PKR 5,000
-// Self-contained: Card/Row/Search sab isi file me hain.
-// Data: GET /api/packages/all (subCategory backend se aati hai)
-// ============================================================
+
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
